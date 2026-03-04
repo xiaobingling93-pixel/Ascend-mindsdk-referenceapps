@@ -349,6 +349,10 @@ class AgentExecutionEngine(_AgentExecutionEngine):
         # for step return
         episode_steps = []
 
+        # for step perf
+        llm_step_times = []
+        env_step_times = []
+
         # Reset environment with the task using the executor
         loop = asyncio.get_event_loop()
         observation, info = await loop.run_in_executor(self.executor, env.reset)
@@ -572,6 +576,28 @@ class AgentExecutionEngine(_AgentExecutionEngine):
                 },
             }
             return token_result
+        elif mode == "Step":
+            from dataclasses import asdict
+            step_result = {
+                "task": trajectory.task,
+                "steps": [asdict(step) for step in trajectory.steps],
+                "chat_completions": agent.chat_completions,
+                "prompt_tokens": torch.tensor([]),
+                "response_tokens": torch.tensor([]),
+                "response_masks": torch.tensor([]),
+                "idx": env.idx,
+                "trajectory_reward": trajectory.reward,
+                "metrics": {
+                    "steps": len(trajectory.steps),
+                    "reward_time": reward_time,
+                    "env_time": env_step_times,
+                    "llm_time": llm_step_times,
+                    "total_time": total_time,
+                    "toolcall_reward": trajectory.toolcall_reward,
+                    "res_reward": trajectory.res_reward,
+                },
+            }
+            return step_result
         else:
             raise ValueError(f"Invalid mode: {mode}. Supported modes are 'Token'.")
 

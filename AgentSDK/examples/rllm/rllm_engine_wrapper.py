@@ -21,8 +21,10 @@ from concurrent.futures import as_completed
 from queue import Queue
 from threading import Thread
 from typing import Any, Dict, List, Optional
+from dataclasses import fields
+import torch
 
-from agentic_rl import Trajectory, BaseEngineWrapper
+from agentic_rl import Trajectory, BaseEngineWrapper, StepTrajectory, Step
 
 verl = types.ModuleType("verl")
 verl.protocol = types.ModuleType("verl.protocol")
@@ -38,6 +40,31 @@ sys.modules["verl.utils.torch_functional"] = verl.utils.torch_functional
 
 from examples.rllm.agent_execution_engine import AgentExecutionEngine, OpenAIRouter
 from examples.agents.agents_mapping import get_agent_by_name
+
+
+def dict_to_step_trajectory(result: Dict[str, Any]) -> StepTrajectory:
+    step_objects = []
+    for step_dict in result.get("steps", []):
+        step_fields = {f.name: step_dict.get(f.name) for f in fields(Step) if f.name in step_dict}
+        step_objects.append(Step(**step_fields))
+
+    step_trajectory_fields = {
+        "task": result.get("task"),
+        "steps": step_objects,
+    }
+
+    base_trajectory_fields = {
+        "prompt_tokens": result.get("prompt_tokens", torch.tensor([])),
+        "response_tokens": result.get("response_tokens", torch.tensor([])),
+        "response_masks": result.get("response_masks", torch.tensor([])),
+        "idx": result.get("idx", 0),
+        "trajectory_reward": result.get("trajectory_reward", 0.0),
+        "chat_completions": result.get("chat_completions", []),
+        "metrics": result.get("metrics", {})
+    }
+
+    merged_fields = {**base_trajectory_fields, **step_trajectory_fields}
+    return StepTrajectory(**merged_fields)
 
 
 class RllmEngineWrapper(BaseEngineWrapper):
@@ -65,6 +92,7 @@ class RllmEngineWrapper(BaseEngineWrapper):
         max_response_length: int = DEFAULT_MAX_RESPONSE_LENGTH,
         n_parallel_agents: int = DEFAULT_N_PARALLEL_AGENTS,
         max_steps: int = DEFAULT_MAX_STEPS,
+        mode: str = "Token",
     ) -> None:
         """
         Initialize the RLLM Engine Wrapper.
@@ -77,6 +105,7 @@ class RllmEngineWrapper(BaseEngineWrapper):
             max_response_length (int): Maximum length of the response.
             n_parallel_agents (int): Number of parallel agents to run.
             max_steps (int): Maximum steps per trajectory.
+            mode (str): Trajectory generation mode, 'Token' for token-level rewards, or 'Step' for step-level rewards.
 
         Raises:
             ValueError / TypeError: If any of the parameters are invalid.
@@ -102,6 +131,9 @@ class RllmEngineWrapper(BaseEngineWrapper):
         self.env_class = agent_config.env_class
         self.agent_args = agent_config.agent_args
         self.env_args = agent_config.env_args
+
+        # Trajectory generation mode
+        self.mode = mode
 
     def initialize(self):
         """
@@ -197,7 +229,7 @@ class RllmEngineWrapper(BaseEngineWrapper):
                 """
                 async def consume_trajectories() -> None:
                     try:
-                        async for trajectory in self.engine.trajectory_generator(mode="Token"):
+                        async for trajectory in self.engine.trajectory_generator(mode=self.mode):
                             results_queue.put(trajectory)
                         results_queue.put(None)  # Sentinel value to indicate completion
                     except Exception as e:
@@ -226,7 +258,13 @@ class RllmEngineWrapper(BaseEngineWrapper):
                         raise RuntimeError(f"Trajectory generation failed: {result}") from result
                     else:
                         # Valid trajectory result
-                        trajectories.append(Trajectory(**result))
+                        if self.mode == 'Step':
+                            traj = dict_to_step_trajectory(result)
+                            trajectories.append(traj)
+                        elif self.mode == 'Token':
+                            trajectories.append(Trajectory(**result))
+                        else:
+                            raise ValueError(f"mode must be 'Token' or 'Step', got '{self.mode}'")
                 except Exception as e:
                     print(f"Error collecting trajectory from queue: {e}")
                     raise RuntimeError(f"Error collecting trajectory from queue: {e}") from e
