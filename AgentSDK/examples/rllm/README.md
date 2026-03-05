@@ -88,6 +88,8 @@ export PYTHONPATH=$PYTHONPATH:/home/third-party/Megatron-LM/:/home/third-party/M
 ```
 
 ## 4 运行
+
+### Token模式运行
 **步骤1：** 下载示例代码 `AgentSDK/examples/rllm` 至工作文件夹。
 
 
@@ -129,3 +131,69 @@ agentic_rl --config-path="/your_config_dir/your_config_file_name.yaml"
 ```
 
 **步骤4：** 查看结果；运行后会在 `save_params_path` 目录下保存模型权重文件。
+
+### Step模式运行
+**步骤1：** 下载示例代码 `AgentSDK/examples/rllm` 至工作文件夹。
+
+
+**步骤2：** 新建 yaml 配置文件，编辑配置参数:
+```sh
+vim /your_config_dir/your_config_file_name.yaml
+
+# 编辑配置参数（示例）
+tokenizer_name_or_path: /path/to/tokenizer
+agent_name: websearcher
+agent_engine_wrapper_path: /your_workdir/AgentSDK/examples/rllm/rllm_engine_wrapper.py
+# 将use_stepwise_advantage设置为True开启step模式
+use_stepwise_advantage: True
+train_backend: mindspeed_rl
+model_name: qwen2.5-7b
+num_gpus_per_node: 8
+max_model_len: 16384
+rollout_n: 2
+infer_tensor_parallel_size: 4
+gpu_memory_utilization: 0.4
+use_tensorboard: true
+
+mindspeed_rl:
+  data_path: /path/to/data
+  load_params_path: /path/to/model_weights
+  save_params_path: /path/to/model_weights_save
+  epochs: 1
+  train_iters: 1
+  save_interval: 1
+  global_batch_size: 16
+  mini_batch_size: 16
+  seq_length: 16384
+  tensor_model_parallel_size: 4
+```
+
+**步骤3：** 修改`AgentSDK/examples/rllm/rllm_engine_wrapper.py`文件，将mode修改为Step模式。
+```
+class RllmEngineWrapper(BaseEngineWrapper):
+    ...
+    def __init__(
+        self,
+        agent_name: str,
+        tokenizer: Any,
+        sampling_params: Optional[Dict[str, Any]] = None,
+        max_prompt_length: int = DEFAULT_MAX_PROMPT_LENGTH,
+        max_response_length: int = DEFAULT_MAX_RESPONSE_LENGTH,
+        n_parallel_agents: int = DEFAULT_N_PARALLEL_AGENTS,
+        max_steps: int = DEFAULT_MAX_STEPS,
+        mode: str = "Step",  # ← 修改此处：从 "Token" 改为 "Step"
+    ) -> None:
+    ...
+```
+
+**步骤4：** 进入`AgentSDK`目录，启动训练任务。
+```sh
+cd /your_workdir/AgentSDK
+agentic_rl --config-path="/your_config_dir/your_config_file_name.yaml"
+```
+
+**步骤5：** 查看结果；运行后会在 `save_params_path` 目录下保存模型权重文件。
+
+**注意：** Step 模式需同时满足两个条件：
+- YAML 配置中设置 use_stepwise_advantage: True
+- RllmEngineWrapper 初始化时 mode="Step"
