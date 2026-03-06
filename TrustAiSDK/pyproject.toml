@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {file = ["version"]}
+
+[project]
+name = "ai-asset-obfuscate"
+dynamic = ["version", "description", "readme"]
+authors = [
+    {name = "Huawei Technologies Co., Ltd"},
+]
+license = {text = "Apache License 2.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://gitcode.com/Ascend/mindsdk-referenceapps"
+Documentation = "https://gitcode.com/Ascend/mindsdk-referenceapps"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.setuptools.package-data]
+ai_asset_obfuscate = ["**/*"]

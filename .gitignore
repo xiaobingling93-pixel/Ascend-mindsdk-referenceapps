@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+.trae/
 
 # Compiled Object files
 *.slo
@@ -31,3 +32,11 @@
 *.out
 *.app
 /AgentSDK/data_generation_platform/frontend/.gitkeep
+*.pyc
+
+# TrustAiSDK build artifacts
+TrustAiSDK/build/
+TrustAiSDK/dist/
+TrustAiSDK/ai_asset_obfuscate.egg-info/
+TrustAiSDK/output/
+TrustAiSDK/__pycache__/
