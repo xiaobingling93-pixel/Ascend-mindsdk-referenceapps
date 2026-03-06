@@ -12,6 +12,7 @@
 | [VisionSDK](./VisionSDK) | Vision SDK官方应用样例目录        |
 | [IndexSDK](./IndexSDK)        | Index SDK参考样例目录             |
 | [RAGSDK](./RAGSDK)        | RAG SDK参考样例目录             |
+| [TrustAiSDK](./TrustAiSDK)        | TrustAi SDK参考样例目录             |
 ## 相关网站
 
 昇腾社区鼓励开发者多交流，共学习。开发者可以通过昇腾社区网站获取最新的MindSDK的软件、文档等资源；可以通过昇腾论坛与其他开发者交流开发经验。
