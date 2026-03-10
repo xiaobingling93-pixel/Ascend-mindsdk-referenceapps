@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """混淆结构体构造和相关校验"""
-
+import ctypes
 import errno
 import glob
 import json
@@ -12,24 +12,23 @@ import shutil
 import stat
 from collections import defaultdict
 from concurrent.futures import wait, FIRST_EXCEPTION, CancelledError
+from ctypes import c_uint32
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-from dataclasses import dataclass
-from ctypes import c_int32
 
+import numpy as np
 import torch
-from safetensors.torch import load_file, save_file
 from safetensors import safe_open
+from safetensors.torch import load_file, save_file
 
 from .asset_obfuscation import AssetObfuscation
-from ..constants import Constant, ErrorCode, ModelType, OpType, DType
+from ..constants import Constant, ErrorCode, ModelType, OpType
 from ..exception import ObfException
-from ..utils import log, rand_by_seed, parameter_validation_file, generate_random_obf_list, \
-    check_device_space, clean_bytearray, thread_pools, check_white_list, data_dec_mul
-from ..utils.py_utils.common_util import restore_white_set
+from ..utils import (log, parameter_validation_file, check_device_space, clean_bytearray, thread_pools,
+                     check_white_list, data_dec_mul)
 from ..utils.c_utils.obf_api import (create_weight_obfuscator, destroy_weight_obfuscator, apply_weight_obfuscation,
-                                      ObfConfig, ObfOperation)
-import numpy as np
+                                     ObfConfig, ObfOperation, TORCH_TO_NP_DTYPE)
 
 
 def parse_model_weight(model_path):
@@ -162,40 +161,13 @@ def select_mapping(obf_config_name):
 
 
 def get_rule_for_key(template_key, mapping):
-    #moe模型model.visual.merger.linear_fc2.bias、model.visual.merger.linear_fc2.weight不加[7,0]
+    # moe模型model.visual.merger.linear_fc2.bias、model.visual.merger.linear_fc2.weight不加[7,0]
     if template_key in {"model.visual.merger.linear_fc2.bias", "model.visual.merger.linear_fc2.weight"}:
         return None
     for keyword, rule in mapping.items():
         if keyword in template_key:
             return rule
     return None
-
-
-class GeneratedObfResources:
-    def __init__(self):
-        # 自定义混淆列表
-        self.obf_custom_dict = {
-            OpType.COL_SHUFFLE: {},
-            OpType.CUSTOM_COL_SHUFFLE: {},
-            OpType.COL_SHUFFLE_ADDIN: {},
-            OpType.COL_SHUFFLE_COEFFICIENT: {},
-            OpType.RESHAPE_SHUFFLE: {}
-        }
-        self.obf_dict = {
-            OpType.ROW_SHUFFLE: None,
-            OpType.COL_SHUFFLE: None,
-            OpType.COL_SHUFFLE_ADDIN: None,
-            OpType.MTP_COL_SHUFFLE: None,
-            OpType.MUL_MASK: None,
-            OpType.DE_MUL_MASK: None,
-            OpType.COL_SHUFFLE_COEFFICIENT: None,
-            OpType.MTP_COL_SHUFFLE_COEFFICIENT: None,
-            OpType.SEGMENT_SWITCH: None,
-            OpType.SEGMENT_COL_SHUFFLE: None,
-            OpType.SEGMENT_NEGATIVE: None,
-            OpType.MOE_COL_SHUFFLE: None,
-            OpType.VL_COL_SHUFFLE: None
-        }
 
 
 class ObfParam:
@@ -300,13 +272,6 @@ def _check_device(device_type, device_id):
 def _check_local_save_path(is_local_save, seed_ciphertext_dir) -> bool:
     return is_local_save and isinstance(seed_ciphertext_dir, str) and not os.path.islink(seed_ciphertext_dir) \
         and os.path.exists(seed_ciphertext_dir)
-
-
-def generate_de_obf_tensor(obf_list):
-    de_list = [0] * len(obf_list)
-    for index, value in enumerate(obf_list):
-        de_list[value] = index
-    return de_list
 
 
 @dataclass
@@ -470,40 +435,10 @@ class ModelAssetObfuscation(AssetObfuscation):
                 seed_content) < Constant.SEED_CONTENT_MIN_LEN:
             log.error("The obfuscate seed content len validation failed.")
             return ErrorCode.INVALID_SEED_CONTENT.value
-        
-        # 解析配置文件
-        result = self._parse_obf_conf(seed_type)
-        if result != ErrorCode.SUCCESS.value:
-            log.error("Failed to parse obfuscate config.")
-            return result
-        
-        # 准备C++混杂器配置
-        obf_config = ObfConfig()
-        obf_config.hidden_size = self.hidden_size if self.hidden_size else 0
-        obf_config.vocab_size = self.vocab_size if self.vocab_size else 0
-        obf_config.intermediate_size = self.intermediate_size if self.intermediate_size else 0
-        obf_config.moe_intermediate_size = self.moe_intermediate_size if self.moe_intermediate_size else 0
-        obf_config.head_dim = self.head_dim if self.head_dim else 0
-        obf_config.num_attention_heads = self.num_attention_heads if self.num_attention_heads else 0
-        obf_config.vision_hidden_size = self.vision_hidden_size if self.vision_hidden_size else 0
-        obf_config.tp_num = self.tp_num if self.tp_num else 1
-        obf_config.obf_coefficient = self.obf_coefficient if self.obf_coefficient else 1.0
-        
-        # 将种子内容转换为字节数组
         seed_content_bytes = bytearray(seed_content, "utf-8")
-        
-        try:
-            # 创建C++混淆器对象
-            self.c_obfuscator = create_weight_obfuscator(seed_content_bytes, obf_config)
-            clean_bytearray(seed_content_bytes)
-            return ErrorCode.SUCCESS.value
-        except Exception as e:
-            log.error(f"Failed to create C++ obfuscator: {e}")
-            clean_bytearray(seed_content_bytes)
-            if self.c_obfuscator is not None:
-                destroy_weight_obfuscator(self.c_obfuscator)
-                self.c_obfuscator = None
-            return ErrorCode.CREATE_OBFUSCATOR_FAILED.value
+        set_seed_result = self._set_seed_core(seed_content_bytes, seed_type)
+        clean_bytearray(seed_content_bytes)
+        return set_seed_result
 
     def set_from_local(self, is_local_save, seed_ciphertext_dir, seed_type):
         if not _check_local_save_path(is_local_save, seed_ciphertext_dir):
@@ -521,7 +456,6 @@ class ModelAssetObfuscation(AssetObfuscation):
         # 使用重构后的set_seed_content接口（内部调用C++）
         return self.set_seed_content(seed_type, seed_content_str, is_local_save=False)
 
-    # # 模型权重混淆
     def model_weight_obf(self, obf_type: int, precision_mode: int = None, model_save_path: str = None,
                          device_type: str = 'cpu', device_id: List[int] = None) -> (int, str):
         """
@@ -531,7 +465,7 @@ class ModelAssetObfuscation(AssetObfuscation):
         obf_type: 混淆类型，0表示同时进行两种模型权重混淆处理，1用于模型保护的模型权重混淆处理，2用于数据保护的模型权重混淆处理
         precision_model: 精度选择(可选0,1)  0为浮点计算模式  1为量化计算模式
         model_save_path: 混淆后模型存储路径
-        device_type: 使用npu\\cpu加速
+        device_type: 使用npu\cpu加速
         device_id: npu设备id, 当device_type是cpu时，可不传；当device_type是npu，device_id为空时，默认使用0号卡
         返回值:
         （errorcode， msg）
@@ -552,24 +486,19 @@ class ModelAssetObfuscation(AssetObfuscation):
             obf_result = self._obf_core(obf_type, obf_param)
             if obf_result == ErrorCode.SUCCESS.value:
                 self._update_flag(obf_type, obf_param)
-            # 清理C++混淆器资源
-            if self.c_obfuscator is not None:
-                destroy_weight_obfuscator(self.c_obfuscator)
-                self.c_obfuscator = None
             return obf_result
         except ObfException as e:
             log.error("Failed to obfuscation the model weight.")
-            # 清理C++混淆器资源
+            return e.code, e.message
+        finally:
             if self.c_obfuscator is not None:
                 destroy_weight_obfuscator(self.c_obfuscator)
                 self.c_obfuscator = None
-            return e.code, e.message
 
     def _obf_core(self, obf_type, obf_param) -> (int, str):
         # 找到所有需要加载的模型文件
         all_model_name = self._get_models()
         if obf_param.device_type == 'npu':
-            import torch_npu  # 编译器可能会提示未使用，为编译器误报不能删除
             futures = []
             # 遍历 all_model_name，为每个元素启动一个线程池执行任务.
             for idx, model_name in enumerate(all_model_name):
@@ -643,10 +572,10 @@ class ModelAssetObfuscation(AssetObfuscation):
         if self.c_obfuscator is None:
             log.error("C++ obfuscator not initialized. Call set_seed_content() first.")
             raise ObfException(ErrorCode.OBFUSCATOR_NOT_INITIALIZED.value)
-        
+
         # 反转操作顺序用于解混淆
         reverse_ops = self.is_obfuscation
-        
+
         if self.weight_map is None:
             for weight_name, obf_ops in obf_config.items():
                 model_obf_param.set_weight_name(weight_name)
@@ -678,111 +607,48 @@ class ModelAssetObfuscation(AssetObfuscation):
         if model_weight is None:
             log.warning(f"Model weight {model_obf_param.weight_name} not found, skip obfuscation.")
             return
-        
+
         original_shape = model_weight.shape
         original_dtype = model_weight.dtype
-        
-        # # 转换为numpy数组，再转为字节流
-        if original_dtype == torch.bfloat16:
-            # 先转为float32类型，用于bytes转换
-            weight_tensor = model_weight.cpu().float()
-            conversion_dtype = np.float32
-        else:
-            # 其他类型直接转换
-            weight_tensor = model_weight.cpu()
-            # 映射torch dtype到numpy dtype
-        torch_to_np_dtype = {
-            torch.float32: np.float32,
-            torch.float16: np.float16,
-            torch.float64: np.float64,
-            torch.int8: np.int8,
-            torch.int16: np.int16,
-            torch.int32: np.int32,
-            torch.int64: np.int64,
-            torch.uint8: np.uint8,
-        }
-        conversion_dtype = torch_to_np_dtype.get(original_dtype)
+        weight_tensor = model_weight.cpu().float() if original_dtype == torch.bfloat16 else model_weight.cpu()
+        conversion_dtype = TORCH_TO_NP_DTYPE.get(original_dtype)
         if conversion_dtype is None:
             log.warning(f"Unsupported dtype {original_dtype}, using float32 as fallback")
             weight_tensor = weight_tensor.float()
             conversion_dtype = np.float32
-        
-        # 定义torch dtype到DType枚举的映射
-        torch_to_dtype_enum = {
-            torch.bfloat16: DType.BFLOAT16.value,
-            torch.float16: DType.FLOAT16.value,
-            torch.float32: DType.FLOAT32.value,
-        }
-        
-        weight_array = weight_tensor.numpy()
-        weight_bytes = weight_array.tobytes()
+        weight_bytes = weight_tensor.numpy().tobytes()
         # 创建输出缓冲区
         output_buffer = bytearray(len(weight_bytes))
-        
+
         # 对每个操作应用混淆
         for obf_op in obf_ops:
             # 检查操作格式
-            if not isinstance(obf_op, list) or (
-                    len(obf_op) != Constant.OP_DIM_INDEX + 1 and len(obf_op) != Constant.OP_CUSTOM_LEN_INDEX + 1):
-                log.error("The format or length of the value is incorrect.")
-                raise ObfException(ErrorCode.CONFIGURATION_FILE_FORMAT_ERROR.value)
-            
+            self._check_obf_op(obf_op)
             # 准备ObfOperation结构
-            operation = ObfOperation()
-            operation.op_type = obf_op[Constant.OP_TYPE_INDEX]
-            operation.dim = obf_op[Constant.OP_DIM_INDEX]
-            if len(obf_op) == Constant.OP_CUSTOM_LEN_INDEX + 1:
-                operation.custom_start = obf_op[Constant.OP_CUSTOM_START_INDEX]
-                operation.custom_len = obf_op[Constant.OP_CUSTOM_LEN_INDEX]
-            else:
-                operation.custom_start = 0
-                operation.custom_len = 0
-            operation.weight_rank = len(original_shape)
-            # 填充shape信息
-            operation.shape = (c_int32 * 8)(*([0] * 8))
-            for i, dim_size in enumerate(original_shape):
-                if i < 8:
-                    operation.shape[i] = dim_size
-            
-            # 设置dtype字段
-            dtype_enum = torch_to_dtype_enum.get(original_dtype)
-            if dtype_enum is None:
-                log.warning(f"Unsupported dtype {original_dtype}, using FLOAT32 as fallback")
-                dtype_enum = DType.FLOAT32.value
-            operation.dtype = dtype_enum
-            
+            operation = ObfOperation(obf_op, original_dtype, original_shape)
             # 调用C++混淆接口
             input_data = weight_bytes if obf_op == obf_ops[0] else output_buffer
             output_buffer = apply_weight_obfuscation(self.c_obfuscator, input_data, operation)
-        
-        # 将结果转换回torch.Tensor
+
         # 使用conversion_dtype来解析bytes（因为可能发生了dtype转换）
         try:
-            obf_array = np.frombuffer(output_buffer, dtype=conversion_dtype)
+            obf_array = np.frombuffer(output_buffer, dtype=conversion_dtype).copy()
         except Exception as np_error:
-            import traceback
-            traceback.print_exc()
             raise ObfException(ErrorCode.APPLY_OBFUSCATION_FAILED.value) from np_error
-        obf_tensor = torch.from_numpy(obf_array).reshape(original_shape)
-        # 如果原始类型是bfloat16，从float32转换回bfloat16
-        if original_dtype == torch.bfloat16:
-            # 直接从float32转为bfloat16
-            obf_tensor = obf_tensor.to(original_dtype)
-        else:
-            # 其他类型保持原始dtype
-            obf_tensor = obf_tensor.to(original_dtype)
+        obf_tensor = torch.from_numpy(obf_array).reshape(original_shape).to(original_dtype)
         # 写回模型权重
         model_obf_param.set_obf_model_weight(obf_tensor)
+
+    def _check_obf_op(self, obf_op):
+        if not isinstance(obf_op, list) or (
+                len(obf_op) != Constant.OP_DIM_INDEX + 1 and len(obf_op) != Constant.OP_CUSTOM_LEN_INDEX + 1):
+            log.error("The format or length of the value is incorrect.")
+            raise ObfException(ErrorCode.CONFIGURATION_FILE_FORMAT_ERROR.value)
 
     def _check_obf_type(self, obf_type):
         if obf_type not in [Constant.OBF_BY_ALL_SEED, Constant.OBF_BY_MODEL_SEED, Constant.OBF_BY_DATA_SEED]:
             log.error("The [obf_type] is invalid.")
             raise ObfException(ErrorCode.INVALID_OBF_TYPE.value)
-        if (obf_type == Constant.OBF_BY_ALL_SEED and (
-                self.obf_resources_map.get(Constant.MODEL_SEED_TYPE) is None or
-                self.obf_resources_map.get(Constant.DATA_SEED_TYPE) is None)):
-            log.error(f"The [obf_type] is {obf_type} but does not set model seed content or data seed content.")
-            raise ObfException(ErrorCode.UNMATCHED_OBF_TYPE.value)
 
     def _check_flag_obf(self, obf_type):
         if self.flag == Constant.MODEL_CONFUSED and obf_type != Constant.OBF_BY_DATA_SEED:
@@ -936,64 +802,39 @@ class ModelAssetObfuscation(AssetObfuscation):
         shutil.copytree(self.model_path, model_save_path, ignore=ignore_model_file, dirs_exist_ok=True)
         log.info("Success to copy model config files to model save path.")
 
-    def _high_precision_obf_tensor(self, mask_list):
-        mask_vector = []
-        # 根据数据类型设置掩码
-        if self.torch_dtype in ['float32', 'bfloat16']:
-            mask = [0.125, 0.25, 0.5, 1, 2, 4, 8, -0.125, -0.25, -0.5, -1, -2, -4, -8]
-        else:
-            mask = [0.5, 1, 2, -0.5, -1, -2]
-        # 构造掩码向量
-        for i in mask_list:
-            mask_vector.append(mask[i % len(mask)])
-        return torch.tensor(mask_vector)
-
-    def _generate_obf_resources(self, obf_resources_tmp):
-        obf_resources = GeneratedObfResources()
-        for key, value in obf_resources_tmp.obf_dict.items():
-            if value is None:
-                continue
-            if self.is_obfuscation or key == OpType.SEGMENT_SWITCH or key == OpType.SEGMENT_NEGATIVE:
-                obf_resources.obf_dict[key] = torch.tensor(value)
-            else:
-                obf_resources.obf_dict[key] = torch.tensor(generate_de_obf_tensor(value))
-        for key, value in obf_resources_tmp.obf_custom_dict.items():
-            obf_resources.obf_custom_dict[key] = {
-                k: torch.tensor(v if self.is_obfuscation else generate_de_obf_tensor(v))
-                for k, v in value.items()}
-        return obf_resources
-
-    def _set_seed_core(self, seed_content, seed_type):
+    def _set_seed_core(self, seed_content_bytes, seed_type):
+        # 解析配置文件
         result = self._parse_obf_conf(seed_type)
         if result != ErrorCode.SUCCESS.value:
             log.error("Failed to parse obfuscate config.")
             return result
-        # custom_map 自定义列混淆长度的集合
-        custom_map = self._resolve_special_config(seed_type)
-        obf_resources_tmp = GeneratedObfResources()
-        try:
-            self._cal_custom_dict(seed_content, custom_map, obf_resources_tmp)
-            if self.vocab_size is not None:
-                # 根据词汇表长度和因子生成数据混淆列表
-                self._cal_data_obf_tensor(seed_content, obf_resources_tmp)
-            if self.hidden_size is not None:
-                # 根据hidden_size和因子生成模型混淆列表
-                self._cal_model_obf_tensor(seed_content, obf_resources_tmp)
-                self._cal_cache_obf_tensor(seed_content, obf_resources_tmp)
-            if self.vision_hidden_size is not None:
-                self._cal_vision_model_obf_tensor(seed_content, obf_resources_tmp)
-        except ObfException as e:
-            return e.code, e.message
-        self.obf_resources_map[seed_type] = self._generate_obf_resources(obf_resources_tmp)
-        return ErrorCode.SUCCESS.value
 
-    def _resolve_special_config(self, seed_type):
-        custom_map = defaultdict(set)
-        for _, layer_value in self.obf_config_map[seed_type].items():
-            for value in layer_value:
-                if len(value) == Constant.OP_CUSTOM_LEN_INDEX + 1:
-                    custom_map[value[0]].add(value[Constant.OP_CUSTOM_LEN_INDEX])
-        return custom_map
+        obf_c_config = self._generate_c_config()
+        # 设置白名单
+        self._add_white_list_for_config(obf_c_config)
+
+        try:
+            self.c_obfuscator = create_weight_obfuscator(seed_content_bytes, obf_c_config)
+            return ErrorCode.SUCCESS.value
+        except Exception as e:
+            log.error(f"Failed to create C obfuscator.: {e}")
+            if self.c_obfuscator is not None:
+                destroy_weight_obfuscator(self.c_obfuscator)
+                self.c_obfuscator = None
+            return ErrorCode.CREATE_OBFUSCATOR_FAILED.value
+        finally:
+            clean_bytearray(seed_content_bytes)
+
+    def _add_white_list_for_config(self, obf_c_config):
+        white_list_list = list(self.white_set) if self.white_set else []
+        white_list_length = len(white_list_list)
+        if white_list_length > 0:
+            c_white_list = (c_uint32 * white_list_length)(*white_list_list)
+            obf_c_config.white_list = ctypes.cast(c_white_list, ctypes.POINTER(c_uint32))
+            obf_c_config.white_list_length = white_list_length
+        else:
+            obf_c_config.white_list = None
+            obf_c_config.white_list_length = 0
 
     def _choose_obf_conf(self, seed_type):
         if seed_type == Constant.MODEL_SEED_TYPE:
@@ -1016,81 +857,6 @@ class ModelAssetObfuscation(AssetObfuscation):
             return ErrorCode.SUCCESS.value
         except ObfException as e:
             return e.code, e.message
-
-    def _cal_custom_dict(self, seed_content, custom_map, obf_resources_tmp):
-        for key_index, value in custom_map.items():
-            key = OpType(key_index)
-            for custom_len in value:
-                if key == OpType.COL_SHUFFLE:
-                    random_list = rand_by_seed(seed_content, custom_len)
-                    obf_resources_tmp.obf_custom_dict[key][custom_len] = (
-                        self._segmented_obf_tensor(random_list, custom_len))
-                elif key == OpType.CUSTOM_COL_SHUFFLE or key == OpType.RESHAPE_SHUFFLE:
-                    obf_resources_tmp.obf_custom_dict[key][custom_len] = generate_random_obf_list(
-                        rand_by_seed(seed_content, custom_len, Constant.SEED_ADD_IN.encode("utf-8")))
-                elif key == OpType.COL_SHUFFLE_ADDIN:
-                    random_list_with_addin = rand_by_seed(seed_content, custom_len,
-                                                          Constant.SEED_ADD_IN.encode('utf-8'))
-                    obf_resources_tmp.obf_custom_dict[key][custom_len] = (
-                        self._segmented_obf_tensor(random_list_with_addin, custom_len))
-                elif key == OpType.COL_SHUFFLE_COEFFICIENT:
-                    random_list_same_op = self._cal_obf_coe_random_list(seed_content, custom_len)
-                    obf_resources_tmp.obf_custom_dict[key][custom_len] = (
-                        self._segmented_obf_tensor(random_list_same_op, custom_len, True, self.obf_coefficient))
-                else:
-                    log.error("The op type is not supported custom obf tensor length.")
-
-    def _cal_data_obf_tensor(self, seed_content, obf_resources_tmp):
-        data_protection_list = generate_random_obf_list(rand_by_seed(seed_content, self.vocab_size))
-        if data_protection_list is not None:
-            restore_white_set(self.white_set, data_protection_list)
-        obf_resources_tmp.obf_dict[OpType.ROW_SHUFFLE] = data_protection_list
-
-    def _cal_model_obf_tensor(self, seed_content, obf_resources_tmp):
-        # 生成权重混淆映射表
-        random_list = rand_by_seed(seed_content, self.hidden_size)
-        random_list_with_addin = rand_by_seed(seed_content, self.hidden_size, Constant.SEED_ADD_IN.encode('utf-8'))
-        random_list_same_op = self._cal_obf_coe_random_list(seed_content, self.hidden_size)
-        obf_resources_tmp.obf_dict[OpType.COL_SHUFFLE] = self._segmented_obf_tensor(random_list, self.hidden_size)
-        obf_resources_tmp.obf_dict[OpType.COL_SHUFFLE_ADDIN] = (
-            self._segmented_obf_tensor(random_list_with_addin, self.hidden_size))
-        obf_resources_tmp.obf_dict[OpType.COL_SHUFFLE_COEFFICIENT] = (
-            self._segmented_obf_tensor(random_list_same_op, self.hidden_size, True, self.obf_coefficient))
-        if self.moe_intermediate_size:
-            obf_resources_tmp.obf_dict[OpType.MOE_COL_SHUFFLE] = (
-                generate_random_obf_list(rand_by_seed(seed_content, self.moe_intermediate_size)))
-        else:
-            obf_resources_tmp.obf_dict[OpType.MOE_COL_SHUFFLE] = (
-                generate_random_obf_list(rand_by_seed(seed_content, self.intermediate_size)))
-
-    def _cal_obf_coe_random_list(self, seed_content, obf_len):
-        return list(range(int(obf_len / self.tp_num))) * self.tp_num \
-            if math.isclose(self.obf_coefficient, 0.0) \
-            else rand_by_seed(seed_content, math.ceil(obf_len * self.obf_coefficient))
-
-    def _segmented_obf_tensor(self, random_list, obf_len, de_obf_list=False, obf_coefficient=1.0):
-        local_hidden_size = int(obf_len / self.tp_num)
-        part_hidden_size = math.ceil(obf_len / self.tp_num * obf_coefficient)
-        obf_weight_list = []
-        for i in range(self.tp_num):
-            start_idx = local_hidden_size * i
-            end_idx = local_hidden_size * (i + 1)
-            segmented_obf_tmp = generate_random_obf_list(random_list[part_hidden_size * i: part_hidden_size * (i + 1)])
-            if de_obf_list:
-                segmented_obf_tmp = generate_de_obf_tensor(segmented_obf_tmp)
-            segmented_obf_list = [a + start_idx for a in segmented_obf_tmp]
-            segmented_not_obf_list = list(range(start_idx + part_hidden_size, end_idx))
-            obf_weight_list.extend(segmented_obf_list)
-            obf_weight_list.extend(segmented_not_obf_list)
-        return obf_weight_list
-
-    def _cal_cache_obf_tensor(self, seed_content, obf_resources_tmp):
-        head_dim = self.head_dim if self.head_dim is not None else self.hidden_size // self.num_attention_heads
-        qk_protection_list = generate_random_obf_list(rand_by_seed(seed_content, head_dim // 2))
-        vo_protection_list = generate_random_obf_list(rand_by_seed(seed_content, head_dim))
-        obf_resources_tmp.obf_dict[OpType.SEGMENT_SWITCH] = [x % 2 for x in qk_protection_list]
-        obf_resources_tmp.obf_dict[OpType.SEGMENT_NEGATIVE] = obf_resources_tmp.obf_dict[OpType.SEGMENT_SWITCH]
-        obf_resources_tmp.obf_dict[OpType.SEGMENT_COL_SHUFFLE] = vo_protection_list
 
     def _assemble_completion_cfg(self, obf_json, obf_config_name):
         if not is_assemble_cfg(obf_json):
@@ -1238,14 +1004,24 @@ class ModelAssetObfuscation(AssetObfuscation):
         self.moe_intermediate_size = text_config.get("moe_intermediate_size")
         self.intermediate_size = text_config.get("intermediate_size")
         self.num_experts = text_config.get("num_experts")
-        
+
         vision_config = model_config.get("vision_config", "")
         if not vision_config:
             log.error("The model config does not have the [vision_config] property or property invalid.")
             raise ObfException(ErrorCode.MODEL_CONFIG_INVALID_VISION_CONFIG.value)
         self.depth = vision_config.get('depth')
         self.vision_hidden_size = vision_config.get('hidden_size')
-
-    def _cal_vision_model_obf_tensor(self, seed_content, obf_resources_tmp):
-        obf_resources_tmp.obf_dict[OpType.VL_COL_SHUFFLE] = (
-            generate_random_obf_list(rand_by_seed(seed_content, self.vision_hidden_size)))
+    
+    def _generate_c_config(self):
+        obf_config = ObfConfig()
+        obf_config.hidden_size = self.hidden_size or 0
+        obf_config.vocab_size = self.vocab_size or 0
+        obf_config.intermediate_size = self.intermediate_size or 0
+        obf_config.moe_intermediate_size = self.moe_intermediate_size or 0
+        obf_config.head_dim = self.head_dim or 0
+        obf_config.num_attention_heads = self.num_attention_heads or 0
+        obf_config.vision_hidden_size = self.vision_hidden_size or 0
+        obf_config.tp_num = self.tp_num
+        obf_config.obf_coefficient = self.obf_coefficient
+        obf_config.is_obfuscation = self.is_obfuscation
+        return obf_config

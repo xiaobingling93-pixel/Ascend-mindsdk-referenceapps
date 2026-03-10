@@ -5,16 +5,13 @@
 
 import os
 from typing import List
-import numpy as np
-import json
 
 from .asset_obfuscation import AssetObfuscation
 from ..constants import Constant, ErrorCode
 from ..exception import ObfException
 from ..model import TLSConfig, PskConfig
-from ..utils import log, generate_random_obf_list, get_obf_dict_value_by_key, rand_by_seed, clean_bytearray, \
-    get_de_obf_dict_value_by_key, lib_secure_c, \
-    check_white_list, restore_white_set, data_dec_mul, generate_obf_and_de_obf_dict
+from ..utils import log, get_obf_dict_value_by_key, clean_bytearray, \
+    get_de_obf_dict_value_by_key, check_white_list, data_dec_mul, generate_obf_and_de_obf_dict
 
 
 def _check_local_save_path(is_local_save, seed_ciphertext_dir) -> bool:
@@ -156,11 +153,11 @@ class DataAssetObfuscation(AssetObfuscation):
             log.error("Item type must be int and item must less than vocab_size.")
             raise ObfException(ErrorCode.ITEM_VALIDATE_FAILED.value)
 
-    def _set_seed_core(self, seed_content, _):
+    def _set_seed_core(self, seed_content_bytes, seed_type):
         log.info("Start to set seed core.")
         # 使用种子生成随机数，需要将8位数合并成32位数，需要32位数的长度为self.vocab_size，因此需要生成4倍长度的8位数的数组
         try:
-            generate_obf_and_de_obf_dict(self.white_set, seed_content, self.vocab_size)
+            generate_obf_and_de_obf_dict(self.white_set, seed_content_bytes, self.vocab_size)
         except ObfException as e:
             return e.code, e.message
         log.info("Set seed core successful.")

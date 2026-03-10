@@ -6,9 +6,7 @@
 """
 
 import ctypes
-import struct
 from ctypes import Structure, POINTER, c_uint8, c_uint32
-from typing import List
 import numpy as np
 
 from .c_lib import lib_obf_tool
@@ -33,25 +31,11 @@ class ObfData(Structure):
 
 
 # 定义函数参数类型和返回值类型
-lib_obf_tool.GenerateLowPrecisionFloats.argtypes = [
-    ctypes.POINTER(ctypes.c_uint32),  # input_data
-    ctypes.c_size_t,  # input_length
-    ctypes.POINTER(ctypes.c_float)  # output_data
-]
-lib_obf_tool.GenerateLowPrecisionFloats.restype = ctypes.c_int
-
-# 定义函数参数类型和返回值类型
 lib_obf_tool.GenerateRandomBytes.argtypes = [
     ctypes.c_size_t,  # input_length
     ctypes.POINTER(ctypes.c_uint8)  # output_data
 ]
 lib_obf_tool.GenerateRandomBytes.restype = ctypes.c_int
-
-# 设置库函数的参数类型和返回类型
-lib_obf_tool.GenerateRandomSeeds.argtypes = [
-    ctypes.POINTER(CryptData), ctypes.POINTER(ObfData), ctypes.POINTER(ObfData)
-]
-lib_obf_tool.GenerateRandomSeeds.restype = ctypes.c_int  # 返回指针
 
 # 设置库函数的参数类型和返回类型
 lib_obf_tool.GenerateObfAndDeObfDict.argtypes = [
@@ -175,87 +159,6 @@ def generate_obf_and_de_obf_dict(white_set: list, input_seed: bytearray, random_
     if result != 0:
         log.error(f"Failed to generate obf and deobf dict, the result is {result}")
         raise ObfException(ErrorCode.GENERATED_RANDOM_FAILED.value)
-
-
-# 使用种子生成随机数的函数
-def rand_by_seed(input_seed: bytearray, random_list_len: int, adin: bytes = None) -> List[int]:
-    # 创建输入数据
-    input_length = len(input_seed)
-    input_data = (ctypes.c_uint8 * input_length)(*input_seed)
-    crypt_data = CryptData(ctypes.cast(input_data, ctypes.POINTER(ctypes.c_uint8)), ctypes.c_uint32(input_length))
-
-    # 创建附件数据
-    if adin is None:
-        adin_length = 0
-        adin_data = ObfData(None, ctypes.c_uint32(adin_length))
-    else:
-        adin_length = len(adin)
-        adin_tmp = (ctypes.c_uint8 * adin_length)(*adin)
-        adin_data = ObfData(ctypes.cast(adin_tmp, ctypes.POINTER(ctypes.c_uint8)), ctypes.c_uint32(adin_length))
-
-    # 创建输出数据
-    output_length = random_list_len * Constant.MAGNIFYING_FOUR_POWER
-    output_data = (ctypes.c_uint8 * output_length)(*[i for i in range(output_length)])
-    crypt_output = ObfData(ctypes.cast(output_data, ctypes.POINTER(ctypes.c_uint8)),
-                           ctypes.c_uint32(output_length))
-
-    # 调用库函数
-    result = lib_obf_tool.GenerateRandomSeeds(ctypes.byref(crypt_data), ctypes.byref(adin_data),
-                                              ctypes.byref(crypt_output))
-    if result != 0 or crypt_output.len != output_length:
-        log.error(f"Failed to generate random seeds, the result is {result}")
-        raise ObfException(ErrorCode.GENERATED_RANDOM_FAILED.value)
-    # 将输出数据转换为Python可以处理的格式
-    content_list = ctypes.cast(crypt_output.data, ctypes.POINTER(ctypes.c_uint8 * crypt_output.len)).contents
-    random_list = []
-    for i in range(0, output_length, Constant.MAGNIFYING_FOUR_POWER):
-        bytes_be = bytes(content_list[i:i + Constant.MAGNIFYING_FOUR_POWER][::-1])
-        value_be = struct.unpack('>I', bytes_be)[0]
-        random_list.append(value_be)
-    return random_list
-
-
-def generate_random_obf_list(random_uint32_list: List[int]):
-    """
-    生成映射表
-    random_uint32_list: 用于生成不重复列表的随机字节数组
-
-    返回值：
-        random_list： list[int], 生成的随机映射表
-    """
-    random_list = list(range(len(random_uint32_list)))
-    for i in range(len(random_uint32_list) - 1, 0, -1):
-        j = random_uint32_list[i] % (i + 1)
-        random_list[i], random_list[j] = random_list[j], random_list[i]
-    return random_list
-
-
-def generate_random_floats(input_data):
-    """
-    将 uint32_t 数组转换为低精度浮点数数组。
-
-    Args:
-        input_data (list[int]): 输入的 uint32_t 数组（Python 列表）
-
-    Returns:
-        list[float]: 转换后的低精度浮点数数组
-    """
-    # 将 Python 列表转换为 ctypes 数组
-    input_length = len(input_data)
-    c_input_data = (ctypes.c_uint32 * input_length)(*input_data)
-
-    # 分配输出数组的内存空间
-    c_output_data = (ctypes.c_float * input_length)(*input_data)
-
-    # 调用 C 函数
-    result = lib_obf_tool.GenerateLowPrecisionFloats(
-        c_input_data,
-        ctypes.c_size_t(input_length),  # input_length
-        c_output_data  # output_data 指针
-    )
-
-    output_list = [c_output_data[i] for i in range(input_length)]
-    return output_list
 
 
 def generate_random_bytes(random_len):

@@ -6,7 +6,6 @@
 __all__ = [
     "check_device_space",
     "check_white_list",
-    "restore_white_set",
     "parameter_validation_file",
     "parameter_validation_path",
     "parameter_validation_str",
@@ -21,11 +20,7 @@ __all__ = [
     "call_obf_del_seed",
     "call_obf_reg_seed",
     "call_obf_query_seed",
-    "rand_by_seed",
-    "generate_random_obf_list",
     "generate_random_bytes",
-    "generate_random_floats",
-    "obf_weight_by_op_type",
     "thread_pools",
     "generate_obf_and_de_obf_dict",
     "get_obf_dict_value_by_key",
@@ -35,9 +30,9 @@ __all__ = [
 ]
 
 from .c_utils import (data_enc, data_enc_mul, date_dec, data_dec_mul, call_obf_del_seed, call_obf_reg_seed, \
-                      call_obf_query_seed, generate_random_obf_list, generate_random_bytes, generate_random_floats, \
-                      rand_by_seed, generate_obf_and_de_obf_dict, get_obf_dict_value_by_key, \
+                      call_obf_query_seed, generate_random_bytes, generate_obf_and_de_obf_dict,
+                      get_obf_dict_value_by_key, \
                       get_de_obf_dict_value_by_key, apply_patch_and_channel_permute, \
                       lib_secure_c, lib_obf_tool, log, generate_patch_and_channel_permute)
-from .py_utils import check_device_space, check_white_list, restore_white_set, clean_bytearray, \
-    parameter_validation_file, parameter_validation_path, parameter_validation_str, thread_pools, obf_weight_by_op_type
+from .py_utils import check_device_space, check_white_list, clean_bytearray, \
+    parameter_validation_file, parameter_validation_path, parameter_validation_str, thread_pools

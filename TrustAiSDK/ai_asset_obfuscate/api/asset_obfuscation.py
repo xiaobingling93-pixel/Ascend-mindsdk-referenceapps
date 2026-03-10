@@ -13,7 +13,7 @@ from ..utils import log, clean_bytearray, call_obf_query_seed
 
 class AssetObfuscation(ABC):
     @abstractmethod
-    def _set_seed_core(self, seed_content, seed_type):
+    def _set_seed_core(self, seed_content_bytes, seed_type):
         pass  # abstract method
 
     def export_set_obf_seed(self, tls_conf: TLSConfig = None, psk_conf: PskConfig = None,

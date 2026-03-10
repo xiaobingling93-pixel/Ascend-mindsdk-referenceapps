@@ -28,10 +28,3 @@ def check_white_list(token_white_list, vocab_size):
                       "than vocab size.")
             raise ObfException(ErrorCode.WHITE_LIST_CHECK_FAILED.value)
 
-
-def restore_white_set(white_set, obf_list):
-    for white_idx in white_set:
-        if white_idx in obf_list:
-            temp = obf_list[white_idx]
-            obf_list[obf_list.index(white_idx)] = temp
-            obf_list[white_idx] = white_idx

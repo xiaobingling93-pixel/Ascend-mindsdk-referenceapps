@@ -3,22 +3,21 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 """图片数据混淆接口"""
 
-import os
+import base64
 import json
 import math
-import base64
+import os
 from io import BytesIO
 from typing import Tuple
-import numpy as np
 
-from PIL import Image
 import torch
+from PIL import Image
 from torchvision.transforms.v2 import functional as F
 
 from ..api.asset_obfuscation import AssetObfuscation
 from ..constants import Constant, ErrorCode
 from ..exception import ObfException
-from ..utils import log, generate_random_obf_list, rand_by_seed, clean_bytearray, data_dec_mul, \
+from ..utils import log, clean_bytearray, data_dec_mul, \
     generate_patch_and_channel_permute, apply_patch_and_channel_permute
 
 
@@ -114,7 +113,7 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         if not isinstance(image, str) or len(image) > Constant.MAX_BASE64_IMAGE_LENGTH * 1024 * 1024:
             log.error("The image data type or length validation failed.")
             raise ObfException(ErrorCode.INVALID_PARAM.value)
-        
+
         base64_field = "base64,"
         base64_prefix = ""
         if base64_field in image:
@@ -139,7 +138,7 @@ class ImageDataAssetObfuscation(AssetObfuscation):
                 pil_img.close()
             log.error("Failed to open image.")
             raise ObfException(ErrorCode.INVALID_IMAGE.value) from e
-
+    
     @classmethod
     def create_by_config(cls, config_path: str):
         """
@@ -167,7 +166,7 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         temporal_patch_size = data.get("temporal_patch_size")
 
         return cls(patch_size, merge_size, longest_edge, shortest_edge, temporal_patch_size)
-
+    
     def set_seed_content(self, seed_content: str = None, is_local_save: bool = False,
                          seed_ciphertext_dir: str = None) -> (int, str):
         """
@@ -287,16 +286,16 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         permuted_image = self._tensor_to_pil(restored_image)
         return permuted_image
 
-    def _set_seed_core(self, seed_content, _):
+    def _set_seed_core(self, seed_content_bytes, seed_type):
         """
         通过混淆因子生成混淆列表
 
-        :param seed_content: 混淆因子
+        :param seed_content_bytes: 混淆因子
         :return: errorCode(int, str)
         """
         log.info("Start to set seed core.")
         try:
-            generate_patch_and_channel_permute(seed_content, self.patch_size * self.patch_size,
+            generate_patch_and_channel_permute(seed_content_bytes, self.patch_size * self.patch_size,
                                                Constant.SEED_ADD_IN.encode("utf-8"))
         except ObfException as e:
             return e.code, e.message

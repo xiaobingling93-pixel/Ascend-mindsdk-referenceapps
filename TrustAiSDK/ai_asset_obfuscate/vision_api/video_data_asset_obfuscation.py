@@ -3,26 +3,26 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 """视频数据混淆接口"""
 
-import os
+import base64
 import json
 import math
-import base64
+import os
+import tempfile
+from fractions import Fraction
 from io import BytesIO
 from typing import Tuple
-from fractions import Fraction
-import tempfile
 
 import av
 import cv2
-import torch
 import numpy as np
+import torch
 from torchvision.transforms.v2 import functional as F
 from transformers.image_utils import PILImageResampling
 
 from ..api.asset_obfuscation import AssetObfuscation
 from ..constants import Constant, ErrorCode
 from ..exception import ObfException
-from ..utils import log, generate_random_obf_list, rand_by_seed, clean_bytearray, data_dec_mul, \
+from ..utils import log, clean_bytearray, data_dec_mul, \
     generate_patch_and_channel_permute, apply_patch_and_channel_permute
 
 
@@ -315,22 +315,22 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         output_container.close()
         return obf_video_bytes
 
-    def _set_seed_core(self, seed_content, _):
+    def _set_seed_core(self, seed_content_bytes, seed_type):
         """
         通过混淆因子生成混淆列表
 
-        :param seed_content: 混淆因子
+        :param seed_content_bytes: 混淆因子
         :return: errorCode(int, str)
         """
         log.info("Start to set seed core.")
         try:
-            generate_patch_and_channel_permute(seed_content, self.patch_size * self.patch_size,
+            generate_patch_and_channel_permute(seed_content_bytes, self.patch_size * self.patch_size,
                                                Constant.SEED_ADD_IN.encode("utf-8"))
         except ObfException as e:
             return e.code, e.message
         log.info("Set seed core successful.")
         return ErrorCode.SUCCESS.value
-        
+    
     def _sample_frames(self, total_frames: int, fps) -> list:
         target_frames = total_frames
         if self.num_frames > 0:

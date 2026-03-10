@@ -5,7 +5,7 @@
 加载动态链接库文件，实现在python中使用C语言实现的算法
 """
 
-from ctypes import CDLL, c_int, c_void_p, c_size_t, c_uint32, Structure, POINTER, c_double, c_int32
+from ctypes import CDLL, c_int, c_void_p, c_size_t
 import os
 
 from ...constants import ErrorCode

@@ -240,7 +240,7 @@ def data_enc(ks_path, passwd, cipher_file_path):
     lib_obf_tool.EncryptData.restype = ctypes.c_int  # 返回值类型
     data_len = len(passwd)
     data = (ctypes.c_ubyte * data_len).from_buffer(passwd)  # 创建一个字节数组
-    res = lib_obf_tool.EncryptData(ks_path.encode(UTF_8), data, data_len, cipher_file_path.encode(UTF_8))
+    res = lib_obf_tool.EncryptData(ks_path.encode('utf-8'), data, data_len, cipher_file_path.encode('utf-8'))
     for i in range(data_len):
         data[i] = 0
     del data
