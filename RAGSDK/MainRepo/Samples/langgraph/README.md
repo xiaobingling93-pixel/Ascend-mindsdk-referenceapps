@@ -12,7 +12,7 @@
 
 ### 1.1 RAG SDK介绍
 
-RAG SDK 详细资料参考 [《RAG SDK 用户指南》](https://www.hiascend.com/document/detail/zh/mindsdk/71rc1/rag/ragug/mxragug_0001.html)
+RAG SDK 详细资料参考 [《RAG SDK 用户指南》](https://www.hiascend.com/document/detail/zh/mindsdk/730/rag/ragug/mxragug_0001.html)
 > RAG SDK 是昇腾面向大语言模型的知识增强开发套件，为解决大模型知识更新缓慢以及垂直领域知识问答弱的问题，面向大模型知识库提供垂域调优、生成增强、知识管理等特性。
 
 ### 1.2 昇腾mis介绍
@@ -29,7 +29,7 @@ reranker tei [安装地址](https://www.hiascend.com/developer/ascendhub/detail/
 
 ## 2 环境安装
 
-参考[ RAG SDK 用户指南](https://www.hiascend.com/document/detail/zh/mindsdk/71rc1/rag/ragug/mxragug_0001.html)"安装部署"章节，分别安装cann、rag SDK、以及部署embedding, reranker, mindie Service服务,安装langgraph包:pip3
+参考[ RAG SDK 用户指南](https://www.hiascend.com/document/detail/zh/mindsdk/730/rag/ragug/mxragug_0001.html)"安装部署"章节，分别安装cann、rag SDK、以及部署embedding, reranker, mindie Service服务,安装langgraph包:pip3
 install langgraph==0.2.19
 
 ## 3 总体介绍

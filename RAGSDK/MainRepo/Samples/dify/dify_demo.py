@@ -39,6 +39,11 @@ from mx_rag.utils import ClientParam
 
 sys.tracebacklimit = 1000
 
+key_ssl_keyfile = 'ssl_keyfile'
+key_ssl_certfile = 'ssl_certfile'
+key_ssl_ca_certs = 'ssl_ca_certs'
+key_ssl_cert_reqs = 'ssl_cert_reqs'
+
 app = FastAPI()
 
 upload_file_dir = os.environ.get("UPLOAD_FILE_DIR", "/home/data")
@@ -680,10 +685,10 @@ def main():
     parser.add_argument("--port", type=int, default="9098", help="服务端口")
     parser.add_argument("--white_path", type=str, nargs='+', default=["/home", "/mnt"],
                         help="知识文档入库时所在目录白名单")
-    parser.add_argument("--ssl_keyfile", type=str, help="ssl_keyfile")
-    parser.add_argument("--ssl_certfile", type=str, help="ssl_certfile")
-    parser.add_argument("--ssl_ca_certs", type=str, help="ssl_ca_certs")
-    parser.add_argument("--ssl_cert_reqs", type=str, help="ssl_cert_reqs")
+    parser.add_argument("--ssl_keyfile", type=str, help="ssl秘钥文件")
+    parser.add_argument("--ssl_certfile", type=str, help="ssl证书文件")
+    parser.add_argument("--ssl_ca_certs", type=str, help="ssl证书根证书文件")
+    parser.add_argument("--ssl_cert_reqs", type=str, help="ssl证书验证要求，可选值为CERT_NONE、CERT_OPTIONAL、CERT_REQUIRED")
     parser.add_argument("--embedding_url", type=str, default="http://127.0.0.1:9123/embed", help="向量模型服务地址")
     parser.add_argument("--reranker_url", type=str, default="http://127.0.0.1:9124/rerank", help="排序模型服务地址")
     parser.add_argument("--milvus_url", type=str, default="http://127.0.0.1:19530", help="milvus数据库服务地址")
@@ -705,11 +710,11 @@ def main():
 
     uvicorn.run(app, host=args.get("host"),
                 port=int(args.get("port")),
-                ssl_keyfile=args.get("ssl_keyfile", None),
-                ssl_certfile=args.get("ssl_certfile", None),
-                ssl_keyfile_password=getpass.getpass() if args.get("ssl_keyfile") else None,
-                ssl_ca_certs=args.get("ssl_ca_certs", None),
-                ssl_cert_reqs=args.get("ssl_cert_reqs", None))
+                ssl_keyfile=args.get(key_ssl_keyfile, None),
+                ssl_certfile=args.get(key_ssl_certfile, None),
+                ssl_keyfile_password=getpass.getpass() if args.get(key_ssl_keyfile) else None,
+                ssl_ca_certs=args.get(key_ssl_ca_certs, None),
+                ssl_cert_reqs=args.get(key_ssl_cert_reqs, None))
 
 
 if __name__ == "__main__":

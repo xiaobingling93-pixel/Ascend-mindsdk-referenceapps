@@ -5,7 +5,7 @@ ARG TORCH_VERSION=2.1.0
 # 请根据在服务器上执行npu-smi info 命令进行查询，将查询到的"Name"字段最后一位数字删除后值修改PLATFORM字段
 ARG PLATFORM=310P
 ARG CANN_VERSION=8.0.0
-ARG RAG_SDK_VERSION=7.1.T3
+ARG RAG_SDK_VERSION=7.3.0
 ENV no_proxy=172.17.0.1,$no_proxy
 # 设置时区禁用交互式配置
 ENV DEBIAN_FRONTEND=noninteractive

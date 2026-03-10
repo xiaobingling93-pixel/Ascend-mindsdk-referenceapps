@@ -8,7 +8,7 @@ import shutil
 from datasets import tqdm
 from pathlib import Path
 import subprocess
-
+from enum import StrEnum
 import sys
 import httpx
 from PIL import Image
@@ -27,7 +27,8 @@ from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from langchain_opengauss import OpenGaussSettings, OpenGaussAGEGraph
+from langchain_opengauss import OpenGaussSettings
+from langchain_opengauss.OpenGaussAGEGraph import OpenGaussAGEGraph
 from mx_rag.document import LoaderMng
 from mx_rag.document.loader import DocxLoader, PdfLoader, ExcelLoader, PowerPointLoader
 from mx_rag.embedding.service import TEIEmbedding
@@ -50,6 +51,45 @@ user_id = "7d1d04c1-dd5f-43f8-bad5-99795f24bce6"
 WORKSPACE_DIR = "/home/HwHiAiUser/workspace"
 # 配置文件路径
 CONFIG_FILE_PATH = WORKSPACE_DIR + "/" + "config.json"
+
+key_content = 'content'
+key_type = 'type'
+key_rerank_top_k = 'rerank_top_k'
+key_milvus_url = 'milvus_url'
+key_top_k = 'top_k'
+key_graph_pipeline = 'graph_pipeline'
+key_retrieval_top_k = 'retrieval_top_k'
+key_similarity_tail_threshold = 'similarity_tail_threshold'
+key_subgraph_depth = 'subgraph_depth'
+key_batch_size = 'batch_size'
+key_text_prompt = 'text_prompt'
+key_uploaded_files = 'uploaded_files'
+key_parse_image = 'parse_image'
+key_file_to_delete = 'file_to_delete'
+key_delete_document = 'delete_document'
+key_clear_knowledge = 'clear_knowledge'
+key_interleaved_answer = 'interleaved_answer'
+key_interleaved_prompt = 'interleaved_prompt'
+key_similarity_threshold = 'similarity_threshold'
+key_temperature = 'temperature'
+key_max_length = 'max_length'
+key_top_p = 'top_p'
+key_cache_type = 'cache_type'
+key_cache_update_strategy  = 'cache_update_strategy'
+key_cache_size = 'cache_size'
+key_modify_query = 'modify_query'
+key_history_n = 'history_n'
+key_knowledge_name = 'knowledge_name'
+key_primary = 'primary'
+
+STR_TRUE = 'True'
+STR_FALSE = 'False'
+STR_CONFIG_PROMPT = '设置提示词'
+
+class CACHE_TYPE(StrEnum):
+    nocache="nocache"
+    memory_cache = "memory_cache"
+    similarity_cache = "similarity_cache"
 
 if not os.path.exists(WORKSPACE_DIR):
     os.makedirs(WORKSPACE_DIR)
@@ -103,6 +143,7 @@ def catch_errors(func):
         except Exception as e:
             st.error(f"功能出错：{str(e)}")
             st.exception(e)  # 调试用，生产环境可注释
+            return None
 
     return wrapper
 
@@ -244,7 +285,7 @@ def clear_knowledge(knowledge_name: str):
     # 删除从文件解析出来的图片
     try:
         shutil.rmtree(upload_file_dir)
-        if st.session_state.parse_image == 'True':
+        if st.session_state.parse_image == STR_TRUE:
             shutil.rmtree(ocr_store_dir)
     except Exception as e:
         logger.info(f"-------- delete {upload_file_dir} failed: {e}")
@@ -280,6 +321,7 @@ def convert_to_pdf(input_file, output_dir=None):
         return input_file.with_suffix(".pdf")
     except subprocess.CalledProcessError as e:
         logger.error(f"convert to pdf failed：{e}")
+        return None
 
 
 @catch_errors
@@ -300,7 +342,7 @@ def upload_file(knowledge_name: str, file):
 
     file_obj = Path(file_path)
     
-    if st.session_state["parse_image"] == 'True':
+    if st.session_state["parse_image"] == STR_TRUE:
         if file_obj.suffix in [".docx", ".pptx"]:
             file_obj = convert_to_pdf(file_obj)
         if file_obj.suffix == ".pdf":
@@ -335,7 +377,7 @@ def upload_file(knowledge_name: str, file):
     texts = [doc.page_content for doc in docs if doc.page_content]
     meta_data = [{**doc.metadata, "type": "text"} for doc in docs if doc.page_content]
 
-    if st.session_state.parse_image == 'True':
+    if st.session_state.parse_image == STR_TRUE:
         # 解析的图片存放目录
         cur_file_image_path = os.path.join(ocr_store_dir, file_obj.stem, "vlm/images")
 
@@ -464,7 +506,7 @@ def get_kg_files() -> list[str]:
 def get_pipeline():
     work_dir, _ = get_graph_dir()
     llm = Text2TextLLM(
-        base_url=st.session_state["llm_url"] + "/chat/completions",
+        base_url=os.path.join(st.session_state["llm_url"], "chat/completions"),
         model_name=st.session_state["llm_name"],
         llm_config=LLMParameterConfig(max_tokens=st.session_state.max_length,
                                       temperature=st.session_state.temperature,
@@ -575,9 +617,6 @@ def do_parse(
         pdf_bytes_list: list[bytes],  # List of PDF bytes to be parsed
         backend="pipeline",  # The backend for parsing PDF, default is 'pipeline'
         server_url=None,  # Server URL for vlm-http-client backend
-        f_make_md_mode=MakeMode.MM_MD,  # The mode for making markdown content, default is MM_MD
-        start_page_id=0,  # Start page ID for parsing, default is 0
-        end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
     if backend.startswith("vlm-"):
         backend = backend[4:]
@@ -585,7 +624,7 @@ def do_parse(
     parse_method = "vlm"
     for idx, pdf_bytes in enumerate(pdf_bytes_list):
         pdf_file_name = pdf_file_names[idx]
-        pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes, start_page_id, end_page_id)
+        pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes)
         local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, parse_method)
         image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(local_md_dir)
         middle_json, infer_result = vlm_doc_analyze(pdf_bytes, image_writer=image_writer, backend=backend,
@@ -596,7 +635,7 @@ def do_parse(
         # 处理输出文件
         image_dir = str(os.path.basename(local_image_dir))
 
-        md_content_str = vlm_union_make(pdf_info, f_make_md_mode, image_dir)
+        md_content_str = vlm_union_make(pdf_info, MakeMode.MM_MD, image_dir)
         md_writer.write_string(
             f"{pdf_file_name}.md",
             md_content_str,
@@ -611,8 +650,6 @@ def parse_pdf_file(
         output_dir,
         backend="vlm-http-client",
         server_url=None,
-        start_page_id=0,
-        end_page_id=None
 ):
     """
         Parameter description:
@@ -649,9 +686,7 @@ def parse_pdf_file(
             pdf_file_names=file_name_list,
             pdf_bytes_list=pdf_bytes_list,
             backend=backend,
-            server_url=server_url,
-            start_page_id=start_page_id,
-            end_page_id=end_page_id
+            server_url=server_url
         )
 
     except Exception as e:
@@ -1011,7 +1046,7 @@ def answer_with_cache(query):
             answer = json.loads(cache_ans)
             with st.chat_message("ai"):
                 st.markdown(answer)
-            st.session_state["messages"].append({'content': answer, 'type': "ai"})  # 保存ai msg
+            st.session_state["messages"].append({key_content: answer, 'type': "ai"})  # 保存ai msg
             has_cache = True
 
     return has_cache
@@ -1026,8 +1061,8 @@ def answer_without_knowledge(llm_chain, query):
             return
     # 构造请求消息
     messages = [
-        {"role": "system", "content": "你是一个专业的知识问答助手"},
-        {"role": "user", "content": query}
+        {"role": "system", key_content: "你是一个专业的知识问答助手"},
+        {"role": "user", key_content: query}
     ]
 
     with st.chat_message("user"):  # 不用 container; user
@@ -1047,7 +1082,7 @@ def answer_without_knowledge(llm_chain, query):
     if cache_type in ["memory_cache", "similarity_cache"]:
         cache_update(cache_type, query, full_answer)
 
-    st.session_state["messages"].append({'content': full_answer, 'type': "ai"})  # 保存ai msg
+    st.session_state["messages"].append({key_content: full_answer, 'type': "ai"})  # 保存ai msg
 
 
 @catch_errors
@@ -1058,7 +1093,7 @@ def answer_with_knowledge(llm_chain, query):
         if has_cache:
             return
         
-    if st.session_state.graph_pipeline == "True":
+    if st.session_state.graph_pipeline == STR_TRUE:
         pipeline = get_pipeline()
         contexts = pipeline.retrieve_graph(query, batch_size=st.session_state.batch_size,
                                            similarity_tail_threshold=st.session_state.similarity_tail_threshold,
@@ -1077,7 +1112,7 @@ def answer_with_knowledge(llm_chain, query):
             score = text_reranker.rerank(query, [doc.page_content for doc in q_docs])
             q_docs = text_reranker.rerank_top_k(q_docs, score)
 
-    img_docs = [doc for doc in q_docs if doc.metadata.get("type", "") == "image"]
+    img_docs = [doc for doc in q_docs if doc.metadata.get(key_type, "") == "image"]
 
     full_answer = ""
     with st.chat_message("user"):  # 不用 container; user
@@ -1085,12 +1120,12 @@ def answer_with_knowledge(llm_chain, query):
 
     placeholder = st.empty()
 
-    if st.session_state.graph_pipeline == "True":
+    if st.session_state.graph_pipeline == STR_TRUE:
         interleaved_answer = None
     else:
         interleaved_answer = st.session_state.interleaved_answer
 
-    if interleaved_answer == "True":
+    if interleaved_answer == STR_TRUE:
         answer = generate_interleaved_answer(query, q_docs, llm_chain)
         # 流式显示
         for chunk in answer:
@@ -1168,22 +1203,22 @@ def init_config():
         "reranker_url": "http://127.0.0.1:9124/rerank",
         "rerank_top_k": 3,
         "milvus_url": "http://127.0.0.1:19530",
-        "use_knowledge": "True",
-        "graph_pipeline": "False",
+        "use_knowledge": STR_TRUE,
+        "graph_pipeline": STR_FALSE,
         "graph_name": "graph",
         "graph_type": "networkx",
         "oghost": "127.0.0.1",
-        "ogport": "xxxx",
-        "ogdatabase": "xxx",
-        "oguser": "xxx",
-        "ogpassword": 'xxx',
+        "ogport": "8888",
+        "ogdatabase": "postgres",
+        "oguser": "guassdb",
+        "ogpassword": 'abcd123ABC',
         "retrieval_top_k": 3,
         "similarity_tail_threshold": 0.5,
         "subgraph_depth": 3,
         "batch_size": 4,
         "knowledge_name": "test_1",
-        "parse_image": 'False',
-        "interleaved_answer": 'False',
+        "parse_image": STR_FALSE,
+        "interleaved_answer": STR_FALSE,
         "interleaved_prompt": default_text_infer_prompt,
         "text_prompt": default_prompt,
         "temperature": 0.95,
@@ -1191,7 +1226,7 @@ def init_config():
         "max_length": 1024,
         "top_k": 3,
         "similarity_threshold": 0.5,
-        "modify_query": "False",
+        "modify_query": STR_FALSE,
         "history_n": 3,
         "cache_type": "nocache",
         "cache_update_strategy": "LRU",
@@ -1288,11 +1323,11 @@ def set_service_para():
                           key="reranker_url",
                           help="reranker服务地址,格式为http://ip:port/rerank")
         with reranker_columns[1]:
-            st.number_input("rerank_top_k", value=st.session_state["rerank_top_k"], on_change=auto_save_config,
-                            key="rerank_top_k", help="rerank_top_k值")
+            st.number_input(key_rerank_top_k, value=st.session_state[key_rerank_top_k], on_change=auto_save_config,
+                            key=key_rerank_top_k, help="rerank_top_k值")
 
-        st.text_input("milvus_url", value=st.session_state["milvus_url"], on_change=auto_save_config,
-                      key="milvus_url", help="milvus服务基地址,格式为http://ip:port")
+        st.text_input(key_milvus_url, value=st.session_state[key_milvus_url], on_change=auto_save_config,
+                      key=key_milvus_url, help="milvus服务基地址,格式为http://ip:port")
 
 
 @catch_errors
@@ -1305,17 +1340,17 @@ def set_web():
                 st.session_state[key] = value
 
         set_service_para()
-        st.radio("是否使用外部知识库问答：", ["True", "False"],
-                 index=0 if st.session_state["use_knowledge"] == "True" else 1,
+        st.radio("是否使用外部知识库问答：", [STR_TRUE, STR_FALSE],
+                 index=0 if st.session_state["use_knowledge"] == STR_TRUE else 1,
                  help="启用后，系统会结合外部知识库内容进行问答",
                  on_change=lambda: [refresh_chat(), auto_save_config()], key="use_knowledge")
-        if st.session_state.use_knowledge == "True":
-            st.radio("是否启用知识图谱：", ["True", "False"],
-                     index=0 if st.session_state["graph_pipeline"] == "True" else 1,
+        if st.session_state.use_knowledge == STR_TRUE:
+            st.radio("是否启用知识图谱：", [STR_TRUE, STR_FALSE],
+                     index=0 if st.session_state[key_graph_pipeline] == STR_TRUE else 1,
                      help="启用后，知识库内容将以图谱形式存储、检索",
-                     on_change=lambda: [refresh_chat(), auto_save_config()], key="graph_pipeline")
-        if st.session_state.use_knowledge == "True":
-            if st.session_state.get("graph_pipeline", "False") == "True":
+                     on_change=lambda: [refresh_chat(), auto_save_config()], key=key_graph_pipeline)
+        if st.session_state.use_knowledge == STR_TRUE:
+            if st.session_state.get(key_graph_pipeline, STR_FALSE) == STR_TRUE:
                 st.text_input("设置知识图谱名称", value=st.session_state["graph_name"], key="graph_name",
                               on_change=lambda: [get_pipeline(), auto_save_config()])
                 st.selectbox("选择知识图谱类型", ["networkx", "opengauss"],
@@ -1348,107 +1383,108 @@ def set_web():
 
                 with st.expander("设置知识图谱检索参数"):
 
-                    st.slider('retrieval_top_k', 1, 1000, st.session_state["retrieval_top_k"], step=1,
-                              key="retrieval_top_k",
+                    st.slider(key_retrieval_top_k, 1, 1000, st.session_state[key_retrieval_top_k], step=1,
+                              key=key_retrieval_top_k,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="最相似的k个知识片段")
-                    st.slider('similarity_threshold', 0.1, 1.0, st.session_state["similarity_tail_threshold"],
+                    st.slider(key_similarity_threshold, 0.1, 1.0, st.session_state[key_similarity_tail_threshold],
                               step=0.01,
-                              key="similarity_tail_threshold",
+                              key=key_similarity_tail_threshold,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="值越大，越相似")
-                    st.slider('subgraph_depth', 1, 5, st.session_state["subgraph_depth"], step=1, key="subgraph_depth",
+                    st.slider(key_subgraph_depth, 1, 5, st.session_state[key_subgraph_depth], step=1, key=key_subgraph_depth,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="图检索最大探索的深度")
-                    st.slider('batch_size', 1, 1024, st.session_state["batch_size"], step=2, key="batch_size",
+                    st.slider(key_batch_size, 1, 1024, st.session_state[key_batch_size], step=2, key=key_batch_size,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="对节点向量化时的批次大小")
 
-                st.text_area("设置提示词", st.session_state["text_prompt"],
+                st.text_area(STR_CONFIG_PROMPT, st.session_state[key_text_prompt],
                              help="设置的提示词需包含{context}和{question}",
-                             on_change=auto_save_config, key="text_prompt")
+                             on_change=auto_save_config, key=key_text_prompt)
 
-        if st.session_state.use_knowledge == "True":
-            if st.session_state.get("graph_pipeline", "False") == "False":
-                st.text_input("设置知识库名", st.session_state["knowledge_name"], key="knowledge_name",
+        if st.session_state.use_knowledge == STR_TRUE:
+            if st.session_state.get(key_graph_pipeline, "False") == "False":
+                st.text_input("设置知识库名", st.session_state[key_knowledge_name], key=key_knowledge_name,
                               on_change=lambda: [create_new_db(), auto_save_config()])
 
-                cur_knowledge_name = st.session_state.get("knowledge_name", "test_1")
-                st.file_uploader("上传知识文档", key="uploaded_files", accept_multiple_files=True,
+                cur_knowledge_name = st.session_state.get(key_knowledge_name, "test_1")
+                st.file_uploader("上传知识文档", key=key_uploaded_files, accept_multiple_files=True,
                                  type=["docx", "txt", "md", "pdf", "xlsx", "pptx"],
                                  on_change=lambda: [file_upload(cur_knowledge_name), auto_save_config()])
-                st.radio("文档入库时是否提取多模态信息", ['True', 'False'],
-                         index=0 if st.session_state["parse_image"] == "True" else 1,
+                st.radio("文档入库时是否提取多模态信息", [STR_TRUE, STR_FALSE],
+                         index=0 if st.session_state[key_parse_image] == STR_TRUE else 1,
                          help="开启后，调用ocr模型提取文档中的图片、表格信息，当前支持docx、pptx和pdf格式，会自动转成md文档入库",
-                         on_change=lambda: [refresh_chat(), auto_save_config()], key="parse_image")
-                st.text_input("待删除知识文档名", key="file_to_delete", help="如果一次需要删除多个文件，使用逗号分隔")
-                st.button("删除知识库中指定的文档", key="delete_document", help="删除知识库中指定的文档",
-                          type="primary",
+                         on_change=lambda: [refresh_chat(), auto_save_config()], key=key_parse_image)
+                st.text_input("待删除知识文档名", key=key_file_to_delete, help="如果一次需要删除多个文件，使用逗号分隔")
+                st.button("删除知识库中指定的文档", key=key_delete_document, help="删除知识库中指定的文档",
+                          type=key_primary,
                           on_click=delete_document_in_knowledge, args=(cur_knowledge_name,))
 
-                st.button("清空知识库", key="clear_knowledge", help="删除知识库中的所有文档", type="primary",
+                st.button("清空知识库", key=key_clear_knowledge, help="删除知识库中的所有文档", type=key_primary,
                           on_click=clear_knowledge, args=(cur_knowledge_name,))
                 st.text_area("知识库文件详情", value=query_knowledge(cur_knowledge_name))
-                interleaved_answer = st.radio("是否图文嵌入答复", ['True', 'False'],
-                                              index=0 if st.session_state["interleaved_answer"] == "True" else 1,
+                interleaved_answer = st.radio("是否图文嵌入答复", [STR_TRUE, STR_FALSE],
+                                              index=0 if st.session_state[key_interleaved_answer] == STR_TRUE else 1,
                                               help="根据检索到的文本片段和图片描述片段，生成图文嵌入内容",
                                               on_change=lambda: [refresh_chat(), auto_save_config()],
-                                              key="interleaved_answer")
+                                              key=key_interleaved_answer)
 
-                if interleaved_answer == "True":
-                    st.text_area("设置提示词", st.session_state["interleaved_prompt"],
-                                 on_change=auto_save_config, key="interleaved_prompt")
+                if interleaved_answer == STR_TRUE:
+                    st.text_area(STR_CONFIG_PROMPT, st.session_state[key_interleaved_prompt],
+                                 on_change=auto_save_config, key=key_interleaved_prompt)
                 else:
-                    st.text_area("设置提示词", st.session_state["text_prompt"], help="设置的提示词需包含{context}和{question}",
-                                 on_change=auto_save_config, key="text_prompt")
+                    st.text_area(STR_CONFIG_PROMPT, st.session_state[key_text_prompt], help="设置的提示词需包含{context}和{question}",
+                                 on_change=auto_save_config, key=key_text_prompt)
 
                 with st.expander("设置检索参数"):
-                    st.slider('top_k', 1, 100, st.session_state["top_k"], step=1, key="top_k",
+                    st.slider(key_top_k, 1, 100, st.session_state[key_top_k], step=1, key=key_top_k,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="最相似的k个知识片段")
-                    st.slider('similarity_threshold', 0.1, 1.0, st.session_state["similarity_threshold"], step=0.1,
-                              key="similarity_threshold",
+                    st.slider(key_similarity_threshold, 0.1, 1.0, st.session_state[key_similarity_threshold], step=0.1,
+                              key=key_similarity_threshold,
                               on_change=lambda: [refresh_chat(), auto_save_config()],
                               help="值越大，越相似")
 
         with st.expander("设置大模型对话参数"):
-            st.slider("temperature", 0.1, 1.0, st.session_state["temperature"], step=0.1,
+            st.slider(key_temperature, 0.1, 1.0, st.session_state[key_temperature], step=0.1,
                       on_change=lambda: [refresh_chat(), auto_save_config()],
-                      key="temperature",
+                      key=key_temperature,
                       help="温度系数，控制输出的随机性，值越大，回答越随机")
-            st.slider("top_p", 0.1, 1.0, st.session_state["top_p"], step=0.1,
+            st.slider(key_top_p, 0.1, 1.0, st.session_state[key_top_p], step=0.1,
                       on_change=lambda: [refresh_chat(), auto_save_config()],
-                      key="top_p",
+                      key=key_top_p,
                       help="核采样阈值，控制输出多样性（与 temperature 互补）：值越低越精准，值越高越多元")
-            st.slider("max_length", min_value=64, max_value=2048, step=128, value=st.session_state["max_length"],
-                      key="max_length", on_change=lambda: [refresh_chat(), auto_save_config()],
+            st.slider(key_max_length, min_value=64, max_value=2048, step=128, value=st.session_state[key_max_length],
+                      key=key_max_length, on_change=lambda: [refresh_chat(), auto_save_config()],
                       help="大模型输出的最大token数")
 
-        st.selectbox("选择缓存类型", ["nocache", "memory_cache", "similarity_cache"],
-                     index=0 if st.session_state["cache_type"] == "nocache" else (
-                         1 if st.session_state["cache_type"] == "memory_cache" else 2
+        st.selectbox("选择缓存类型", [CACHE_TYPE.nocache, CACHE_TYPE.memory_cache, CACHE_TYPE.similarity_cache],
+                     index=0 if st.session_state[key_cache_type] == CACHE_TYPE.nocache else (
+                         1 if st.session_state[key_cache_type] == CACHE_TYPE.memory_cache else 2
                      ),
-                     on_change=lambda: [get_cache(st.session_state["cache_type"]), auto_save_config()],
-                     key="cache_type",
+                     on_change=lambda: [get_cache(st.session_state[key_cache_type]), auto_save_config()],
+                     key=key_cache_type,
                      help="缓存类型说明，nocache：不使用缓存，每次问答都重新推理，memory_cache：仅匹配完全相同的问题，similarity_cache：匹配语义相似的问题")
-        if st.session_state["cache_type"] in ["memory_cache", "similarity_cache"]:
+        if st.session_state[key_cache_type] in [CACHE_TYPE.memory_cache, CACHE_TYPE.similarity_cache]:
             with st.expander("设置缓存参数"):
                 st.radio("缓存老化策略", options=["LRU", "LFU", "FIFO", "RR"],
-                         index=["LRU", "LFU", "FIFO", "RR"].index(st.session_state.get("cache_update_strategy")),
+                         index=["LRU", "LFU", "FIFO", "RR"].index(st.session_state.get(key_cache_update_strategy)),
                          horizontal=True,  # 横向排列
                          on_change=lambda: auto_save_config(),  # 切换时自动保存配置
-                         key="cache_update_strategy",
+                         key=key_cache_update_strategy,
                          help="缓存满时的更新策略：LRU-替换最久没有访问的，LFU-替换使用频率最低的，FIFO-先进先出，RR-随机替换")
-                st.slider("缓存大小", 1, 100000, st.session_state["cache_size"], step=5,
+                st.slider("缓存大小", 1, 100000, st.session_state[key_cache_size], step=5,
                           on_change=lambda: [refresh_chat(), auto_save_config()],
-                          key="cache_size",
+                          key=key_cache_size,
                           help="缓存大小，配置缓存条目数")
 
-        st.radio("是否开启问题改写：", ["True", "False"], index=0 if st.session_state["modify_query"] == "True" else 1,
+        st.radio("是否开启问题改写：", [STR_TRUE, STR_FALSE],
+                 index=0 if st.session_state[key_modify_query] == STR_TRUE else 1,
                  help="开启问题改写，会根据历史问题进行改写当前问题，更准确理解当前问题语义",
                  on_change=lambda: [refresh_chat(), auto_save_config()],
-                 key="modify_query")
-        st.slider('历史对话轮数', 1, 20, st.session_state["history_n"], step=1, key="history_n",
+                 key=key_modify_query)
+        st.slider('历史对话轮数', 1, 20, st.session_state[key_history_n], step=1, key=key_history_n,
                   on_change=auto_save_config,
                   help="改写问题时采纳的历史对话轮数")
 

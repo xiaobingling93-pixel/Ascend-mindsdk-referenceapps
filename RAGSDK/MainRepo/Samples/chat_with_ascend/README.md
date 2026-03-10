@@ -19,7 +19,7 @@
 
 在ragsdk容器中，打开样例代码目录：
 ```bash
-cd /opt/package/mindsdk-referenceapps/RAGSDK/MainRepo/Samples/RagDemo/chat_with_ascend/
+cd /opt/package/mindsdk-referenceapps/RAGSDK/MainRepo/Samples/chat_with_ascend/
 ```
 > 容器内代码可能未同步至最新版本，建议从代码仓库拉取最新版本以确保一致性
 

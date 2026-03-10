@@ -12,6 +12,17 @@ from mx_rag.storage.vectorstore import MindFAISS
 from mx_rag.utils import ClientParam
 
 
+node_transform_query = 'transform_query'
+node_generate = 'generate'
+node_rerank = 'rerank'
+node_retrieve= 'retrieve'
+node_decompose = 'decompose'
+node_cache_update = 'cache_update'
+node_cache_search = 'cache_search'
+
+key_documents = 'documents'
+key_question = 'question'
+
 def evaluate_creator(evaluator, evaluate_type: str):
     language = "chinese"
 
@@ -120,7 +131,7 @@ def retrieve(retriever: BaseRetriever):
     def retrieve_process(state):
         logger.info("---RETRIEVE---")
         sub_questions = state["sub_questions"]
-        question = state["question"]
+        question = state[key_question]
 
         documents = []
         docs = []
@@ -134,7 +145,7 @@ def retrieve(retriever: BaseRetriever):
             if doc.page_content not in documents:
                 documents.append(doc.page_content)
 
-        return {"documents": documents, "question": question}
+        return {key_documents: documents, key_question: question}
 
     return retrieve_process
 
@@ -142,15 +153,15 @@ def retrieve(retriever: BaseRetriever):
 def rerank(reranker):
     def rerank_process(state):
         logger.info("---RERANK---")
-        question = state["question"]
-        documents = state["documents"]
+        question = state[key_question]
+        documents = state[key_documents]
         if len(documents) < 2:
-            return {"documents": documents, "question": question}
+            return {key_documents: documents, key_question: question}
         scores = reranker.rerank(query=question, texts=documents)
         documents = [Document(page_content=content) for content in documents]
         documents = reranker.rerank_top_k(objs=documents, scores=scores)
 
-        return {"documents": documents, "question": question}
+        return {key_documents: documents, key_question: question}
 
     return rerank_process
 
@@ -412,40 +423,40 @@ def build_mxrag_application(mxrag_component):
     evaluate = mxrag_component.get("evaluator")
 
     workflow = StateGraph(GraphState)
-    workflow.add_node("cache_search", cache_search(cache))
-    workflow.add_node("cache_update", cache_update(cache))
-    workflow.add_node("decompose", decompose(llm))
-    workflow.add_node("retrieve", retrieve(retriever))
-    workflow.add_node("rerank", rerank(reranker))
-    workflow.add_node("generate", generate(llm))
-    workflow.add_node("transform_query", transform_query(llm))
+    workflow.add_node(node_cache_search, cache_search(cache))
+    workflow.add_node(node_cache_update, cache_update(cache))
+    workflow.add_node(node_decompose, decompose(llm))
+    workflow.add_node(node_retrieve, retrieve(retriever))
+    workflow.add_node(node_rerank, rerank(reranker))
+    workflow.add_node(node_generate, generate(llm))
+    workflow.add_node(node_transform_query, transform_query(llm))
 
-    workflow.add_edge(START, "cache_search")
+    workflow.add_edge(START, node_cache_search)
 
     workflow.add_conditional_edges(
-        "cache_search",
+        node_cache_search,
         decide_to_decompose,
         {
             "cache_hit": END,
-            "cache_miss": "decompose",
+            "cache_miss": node_decompose,
         },
     )
 
-    workflow.add_edge("decompose", "retrieve")
-    workflow.add_edge("retrieve", "rerank")
+    workflow.add_edge(node_decompose, node_retrieve)
+    workflow.add_edge(node_retrieve, node_rerank)
 
-    workflow.add_edge("rerank", "generate")
-    workflow.add_edge("transform_query", "cache_search")
+    workflow.add_edge(node_rerank, node_generate)
+    workflow.add_edge(node_transform_query, node_cache_search)
     workflow.add_conditional_edges(
-        "generate",
+        node_generate,
         grade_generation_v_documents_and_question(evaluate),
         {
-            "useful": "cache_update",
-            "not useful": "transform_query"
+            "useful": node_cache_update,
+            "not useful": node_transform_query
         },
     )
 
-    workflow.add_edge("cache_update", END)
+    workflow.add_edge(node_cache_update, END)
     app = workflow.compile()
     return app
 

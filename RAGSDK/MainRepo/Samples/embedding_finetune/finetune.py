@@ -25,7 +25,7 @@ from sentence_transformers.losses import MultipleNegativesRankingLoss
 from sentence_transformers.training_args import BatchSamplers
 
 DEFAULT_LLM_TIMEOUT = 10 * 60
-
+key_id = 'id'
 
 class Finetune:
     def __init__(self,
@@ -147,12 +147,12 @@ class Finetune:
         torch.npu.set_device(torch.device("npu:0"))
         model = SentenceTransformer(model_path, device="npu" if torch.npu.is_available() else "cpu")
         eval_data = load_dataset("json", data_files=self.eval_data_path, split="train")
-        eval_data = eval_data.add_column("id", range(len(eval_data)))
+        eval_data = eval_data.add_column(key_id, range(len(eval_data)))
         corpus = dict(
-            zip(eval_data["id"], eval_data["corpus"])
+            zip(eval_data[key_id], eval_data["corpus"])
         )
         queries = dict(
-            zip(eval_data["id"], eval_data["query"])
+            zip(eval_data[key_id], eval_data["query"])
         )
         relevant_docs = {}
         for q_id in queries:
