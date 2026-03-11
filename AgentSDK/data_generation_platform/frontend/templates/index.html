@@ -769,7 +769,7 @@
                                 @drop.prevent="handleDrop($event)"
                                 @dragover.prevent="$event.dataTransfer.dropEffect = 'copy'"
                             >
-                                <input type="file" x-ref="fileInput" @change="handleFileUpload($event)" accept=".txt,.pdf,.doc,.docx" class="hidden" id="documentUpload">
+                                <input type="file" x-ref="fileInput" @change="handleFileUpload($event)" accept=".txt,.pdf,.doc,.docx,.md" class="hidden" id="documentUpload">
                                 <label for="documentUpload" class="cursor-pointer" @click="if($refs.fileInput) $refs.fileInput.value = ''">
                                     <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
                                     <p class="text-gray-600 text-sm">点击上传文档或拖拽文件到此处</p>
@@ -1838,7 +1838,7 @@
  	                }
                     if (files.length > 0) {
                         const file = files[0];
-                        const allowedTypes = ['.txt', '.pdf', '.doc', '.docx'];
+                        const allowedTypes = ['.txt', '.pdf', '.doc', '.docx', '.md'];
                         const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
 
                         if (!allowedTypes.includes(fileExtension)) {
@@ -1849,7 +1849,7 @@
                         // 检查是否已有上传的文档
                         const hasUploadedDoc = this.uploadedFiles.some(f => {
                             const ext = f.original_filename?.split('.').pop()?.toLowerCase();
-                            return ['txt', 'pdf', 'doc', 'docx'].includes(ext);
+                            return ['txt', 'pdf', 'doc', 'docx', 'md'].includes(ext);
                         });
                         
                         if (hasUploadedDoc) {
@@ -1901,7 +1901,7 @@
                     // 检查是否已有上传的文档
                     const hasUploadedDoc = this.uploadedFiles.some(f => {
                         const ext = f.original_filename?.split('.').pop()?.toLowerCase();
-                        return ['txt', 'pdf', 'doc', 'docx'].includes(ext);
+                        return ['txt', 'pdf', 'doc', 'docx','md'].includes(ext);
                     });
                     
                     if (hasUploadedDoc) {
