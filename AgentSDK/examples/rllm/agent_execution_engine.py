@@ -227,6 +227,7 @@ class AgentExecutionEngine(_AgentExecutionEngine):
         self.max_response_length = max_response_length
         self.max_prompt_length = max_prompt_length
         self.enforce_max_prompt_length = enforce_max_prompt_length
+        self.max_model_len = max_response_length + max_prompt_length
 
         # Initialize agent and environment lists
         self.agents = [None] * n_parallel_agents
@@ -352,7 +353,6 @@ class AgentExecutionEngine(_AgentExecutionEngine):
         # for step perf
         llm_step_times = []
         env_step_times = []
-
         # Reset environment with the task using the executor
         loop = asyncio.get_event_loop()
         observation, info = await loop.run_in_executor(self.executor, env.reset)
@@ -378,15 +378,20 @@ class AgentExecutionEngine(_AgentExecutionEngine):
             raise Exception(
                 f"Trajectory {idx}: initial prompt length {prompt_token_len} already exceeded max_prompt_length {self.max_prompt_length}, retrying")
 
+        max_model_len = self.max_model_len
+        max_tokens_old = self.sampling_params.get("max_tokens", 8192)
         for step_idx in range(self.max_steps):
             # Get action from agent
             prompt_messages = agent.chat_completions.copy() 
             # Max remaining tokens left for the response
             # For enforced max prompt at each step, no need to deduct here
+            curr_step_prompt_length = len(self.tokenizer.encode(
+                self.chat_parser.parse(prompt_messages, add_generation_prompt=True, is_first_msg=True),
+                add_special_tokens=False))
             if not self.enforce_max_prompt_length:
-                max_tokens = self.max_response_length - response_token_len
+                max_tokens = max_model_len - curr_step_prompt_length
             else:
-                max_tokens = self.max_response_length
+                max_tokens = max_tokens_old
 
                 # since max prompt is enforced, we filter out too long prompts.
                 prompt_str = self.chat_parser.parse(prompt_messages, add_generation_prompt=True, is_first_msg=True)
@@ -474,10 +479,15 @@ class AgentExecutionEngine(_AgentExecutionEngine):
 
             # Update repsonse token length
             response_token_len += len(assistant_msg_tokens) + len(env_msg_tokens)
+
             # Reached maximum number of tokens for the trajectory
-            if not self.enforce_max_prompt_length and response_token_len >= self.max_response_length:
+            curr_step_prompt_length = len(self.tokenizer.encode(
+                self.chat_parser.parse(agent.chat_completions, add_generation_prompt=True, is_first_msg=True),
+                add_special_tokens=False))
+
+            if not self.enforce_max_prompt_length and curr_step_prompt_length >= max_model_len:
                 # Truncation length
-                truncation_length = self.max_response_length - response_token_len
+                truncation_length = max_model_len - curr_step_prompt_length
                 # Truncate the response and masks
                 if truncation_length < 0:
                     truncated_response_tokens = (assistant_msg_tokens + env_msg_tokens)[:truncation_length]
@@ -491,7 +501,7 @@ class AgentExecutionEngine(_AgentExecutionEngine):
                 response_masks.extend(truncated_response_masks)
 
                 cur_step = agent.get_current_state()
-                if response_token_len - len(env_msg_tokens) > self.max_response_length:
+                if curr_step_prompt_length - len(env_msg_tokens) > max_model_len:
                     cur_step.reward = 0.0
                 cur_step.done = True
                 termination_reason = "TRUNCATION"
@@ -535,22 +545,25 @@ class AgentExecutionEngine(_AgentExecutionEngine):
             cur_step.reward = reward
         # Closing environment using the executor.
         await loop.run_in_executor(self.executor, env.close)
+
+        trajectory = agent.trajectory
+        # Aggregate final trajectory statistics
+        compute_trajectory_reward(trajectory)
+        compute_mc_return(trajectory, gamma=self.gamma)
+
         if termination_reason:
             if reward > 0:
                 color = "green"
             else:
                 color = "yellow"
+            if termination_reason == "TRUNCATION":
+                reward = trajectory.res_reward
             colorful_print(
                 f"Trajectory {idx} completed due to: {termination_reason}. Reward is {reward}. \n",
                 color,
             )
             if masked_out:
                 colorful_print(f"Trajectory {idx} is masked out due to overlong filter.", "red")
-
-        trajectory = agent.trajectory
-        # Aggregate final trajectory statistics
-        compute_trajectory_reward(trajectory)
-        compute_mc_return(trajectory, gamma=self.gamma)
         
         if mode == "Token":
             token_result = {
@@ -618,4 +631,3 @@ class AgentExecutionEngine(_AgentExecutionEngine):
             raise TypeError("trajectory_timeout must be an integer.")
         if self.trajectory_timeout <= 0:
             raise ValueError("trajectory_timeout must be a positive integer.")
-        

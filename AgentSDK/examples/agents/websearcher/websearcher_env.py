@@ -194,8 +194,8 @@ class WebSearcherEnvironment(BaseEnv):
         """
         try:
             query = tool_args['query']
-            if not isinstance(query, list):
-                raise ValueError("Invalid search query provided.")
+            if not isinstance(query, list) or not query:
+                raise ValueError("Invalid search query provided: query is not a list or query is empty")
             search_result = self.search_function(query)
             result = self._format_tool_output(search_result)
             return result, True

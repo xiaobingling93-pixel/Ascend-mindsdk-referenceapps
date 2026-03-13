@@ -230,18 +230,18 @@ class WebSearcherRewardFn:
 
         # Handle edge cases
         if not model_response:
-            return NULL_REWARD, WebSearcherResultDocs.RESPONSE_EMPTY
+            return NULL_REWARD, WebSearcherResultDocs.RESPONSE_EMPTY.value
         if not ground_truth:
-            return 0, WebSearcherResultDocs.GROUND_TRUTH_EMPTY
+            return 0, WebSearcherResultDocs.GROUND_TRUTH_EMPTY.value
         
         # Special case: invalid question
         gt_invalid = "the question is invalid." in ground_truth
         resp_invalid = "the question is invalid." in model_response
         
         if gt_invalid != resp_invalid:
-            return ERROR_REWARD, WebSearcherResultDocs.INCORRECT
+            return ERROR_REWARD, WebSearcherResultDocs.INCORRECT.value
         if gt_invalid:
-            return CORRECT_REWARD, WebSearcherResultDocs.CORRECT
+            return CORRECT_REWARD, WebSearcherResultDocs.CORRECT.value
         
         # Compute similarity-based reward
         per_answer_true = CORRECT_REWARD / len(ground_truth)
@@ -265,11 +265,11 @@ class WebSearcherRewardFn:
         
         # Apply reward constraints
         if reward < EPS_LOWER:
-            return ERROR_REWARD, WebSearcherResultDocs.INCORRECT
+            return ERROR_REWARD, WebSearcherResultDocs.INCORRECT.value
         if reward > CORRECT_REWARD - EPS_UPPER:
-            return CORRECT_REWARD, WebSearcherResultDocs.CORRECT
+            return CORRECT_REWARD, WebSearcherResultDocs.CORRECT.value
         
-        return reward, WebSearcherResultDocs.PARTIALLY_CORRECT
+        return reward, WebSearcherResultDocs.PARTIALLY_CORRECT.value
     
     def _handle_tool_format(self, eval_data: dict):
         """
