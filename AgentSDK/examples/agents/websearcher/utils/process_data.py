@@ -16,6 +16,7 @@ limitations under the License.
 import json
 import os
 import shutil
+import argparse
 
 def rename_keys_in_jsonl(input_file, output_file=None):
     """
@@ -86,6 +87,10 @@ def rename_keys_in_jsonl(input_file, output_file=None):
             os.remove(temp_file)
         raise e
 
-# Example usage (commented out)
 if __name__ == "__main__":
-    rename_keys_in_jsonl("/path/to/input.jsonl", "output.jsonl")
+    parser = argparse.ArgumentParser(description="Rename keys in a JSONL file: 'answer' -> 'ground_truth', 'question' -> 'problem'.")
+    parser.add_argument("input", help="Path to input JSONL file.")
+    parser.add_argument("output", nargs="?", default=None, help="Path to output JSONL file. If not provided, modifies input file in-place (a backup with suffix .bak is created).")
+    args = parser.parse_args()
+
+    rename_keys_in_jsonl(args.input, args.output)
