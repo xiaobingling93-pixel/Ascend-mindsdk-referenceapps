@@ -1,0 +1,23 @@
+{
+  "skill_name": "multimodal-competitor-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在使用 NVIDIA DALI 做图像和视频的预处理，现在想迁移到昇腾 NPU 平台上。请帮我分析 DALI 和昇腾 MultimodalSDK 的能力差异，给出迁移方案和工具量分析。",
+      "expected_output": "Competitor analysis report comparing NVIDIA DALI vs MultimodalSDK, gap analysis, NPU migration plan with operator mapping, and tool quantity analysis with effort estimation",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我们当前使用 OpenCV + torchvision 做 multimodal 模型的预处理，主要是 Qwen2VL 和 InternVL2 模型。性能瓶颈在 CPU 预处理上，想了解如何迁移到 NPU，需要注意什么？",
+      "expected_output": "Analysis of OpenCV/torchvision preprocessing capabilities, comparison with MultimodalSDK adapters for Qwen2VL and InternVL2, pain point identification, and NPU migration recommendations with complexity assessment",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我想了解当前主流的多模态预处理方案（NVIDIA DALI、OpenCV CUDA、Decord）相比昇腾 MultimodalSDK 有什么优势和不足？我们的场景是边缘部署，功耗敏感。",
+      "expected_output": "Comprehensive competitor analysis covering DALI, OpenCV CUDA, Decord, highlighting strengths/weaknesses vs MultimodalSDK, with specific focus on edge deployment and power efficiency considerations",
+      "files": []
+    }
+  ]
+}
