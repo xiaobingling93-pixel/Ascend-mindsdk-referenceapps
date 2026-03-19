@@ -89,11 +89,11 @@ export PYTHONPATH=$PYTHONPATH:/home/third-party/Megatron-LM/:/home/third-party/M
 
 ## 4 运行
 
-### Token模式运行
+### 4.1 Token模式运行
 **步骤1：** 下载示例代码 `AgentSDK/examples/rllm` 至工作文件夹。
 
 
-**步骤2：** 新建 yaml 配置文件，编辑配置参数:
+**步骤2：** 新建 yaml 配置文件，编辑配置参数。
 ```sh
 vim /your_config_dir/your_config_file_name.yaml
 
@@ -106,22 +106,44 @@ train_backend: mindspeed_rl
 model_name: qwen2.5-7b
 num_gpus_per_node: 8
 max_model_len: 16384
-rollout_n: 2
+max_num_seqs: 32
+max_num_batched_tokens: 16384
+rollout_n: 16
 infer_tensor_parallel_size: 4
 gpu_memory_utilization: 0.4
+kl_penalty: low_var_kl
 use_tensorboard: true
+test_before_train: false
+test_only: false
+dataset_additional_keys: ["problem", "ground_truth"] # 必须匹配预处理后数据中的字段名，此处以websearcher场景为例
+top_k: 50
+top_p: 0.9
+min_p: 0.01
+temperature: 0.8
+entropy_coeff: 0.001
+kl_coef: 0.001
+kl_horizon: 1000
+lam: 0.95
+kl_target: 100.0
+weight_decay: 0.01
+max_prompt_length: 8192
+actor_rollout_dispatch_size: 16
 
 mindspeed_rl:
   data_path: /path/to/data
   load_params_path: /path/to/model_weights
   save_params_path: /path/to/model_weights_save
   epochs: 1
-  train_iters: 1
-  save_interval: 1
+  train_iters: 100
+  save_interval: 100
   global_batch_size: 16
   mini_batch_size: 16
   seq_length: 16384
   tensor_model_parallel_size: 4
+  # 根据需要选择是否添加下面三个参数以开启开启重计算功能
+  recompute_granularity: full
+  recompute_method: block
+  recompute_num_layers: 24
 ```
 
 **步骤3：** 进入`AgentSDK`目录，启动训练任务。
@@ -132,11 +154,11 @@ agentic_rl --config-path="/your_config_dir/your_config_file_name.yaml"
 
 **步骤4：** 查看结果；运行后会在 `save_params_path` 目录下保存模型权重文件。
 
-### Step模式运行
+### 4.2 Step模式运行
 **步骤1：** 下载示例代码 `AgentSDK/examples/rllm` 至工作文件夹。
 
 
-**步骤2：** 新建 yaml 配置文件，编辑配置参数:
+**步骤2：** 新建 yaml 配置文件，编辑配置参数。
 ```sh
 vim /your_config_dir/your_config_file_name.yaml
 
@@ -144,28 +166,49 @@ vim /your_config_dir/your_config_file_name.yaml
 tokenizer_name_or_path: /path/to/tokenizer
 agent_name: websearcher
 agent_engine_wrapper_path: /your_workdir/AgentSDK/examples/rllm/rllm_engine_wrapper.py
-# 将use_stepwise_advantage设置为True开启step模式
-use_stepwise_advantage: True
+use_stepwise_advantage: True # 将use_stepwise_advantage设置为True开启step模式
 train_backend: mindspeed_rl
 model_name: qwen2.5-7b
 num_gpus_per_node: 8
 max_model_len: 16384
-rollout_n: 2
+max_num_seqs: 32
+max_num_batched_tokens: 16384
+rollout_n: 16
 infer_tensor_parallel_size: 4
 gpu_memory_utilization: 0.4
+kl_penalty: low_var_kl
 use_tensorboard: true
+test_before_train: false
+test_only: false
+dataset_additional_keys: ["problem", "ground_truth"] # 必须匹配预处理后数据中的字段名，此处以websearcher场景为例
+top_k: 50
+top_p: 0.9
+min_p: 0.01
+temperature: 0.8
+entropy_coeff: 0.001
+kl_coef: 0.001
+kl_horizon: 1000
+lam: 0.95
+kl_target: 100.0
+weight_decay: 0.01
+max_prompt_length: 8192
+actor_rollout_dispatch_size: 16
 
 mindspeed_rl:
   data_path: /path/to/data
   load_params_path: /path/to/model_weights
   save_params_path: /path/to/model_weights_save
   epochs: 1
-  train_iters: 1
-  save_interval: 1
+  train_iters: 100
+  save_interval: 100
   global_batch_size: 16
   mini_batch_size: 16
   seq_length: 16384
   tensor_model_parallel_size: 4
+  # 根据需要选择是否添加下面三个参数以开启开启重计算功能
+  recompute_granularity: full
+  recompute_method: block
+  recompute_num_layers: 24
 ```
 
 **步骤3：** 修改`AgentSDK/examples/rllm/rllm_engine_wrapper.py`文件，将mode修改为Step模式。
@@ -194,6 +237,12 @@ agentic_rl --config-path="/your_config_dir/your_config_file_name.yaml"
 
 **步骤5：** 查看结果；运行后会在 `save_params_path` 目录下保存模型权重文件。
 
-**注意：** Step 模式需同时满足两个条件：
-- YAML 配置中设置 use_stepwise_advantage: True
-- RllmEngineWrapper 初始化时 mode="Step"
+**注意：** Step 模式需同时满足两个条件，两个参数需正确对应配置：
+- YAML 配置中设置 `use_stepwise_advantage: True`：该参数用于指定训练过程中是否采用 step 模式进行训练
+- `RllmEngineWrapper` 初始化时设置 `mode="Step"`：该参数用于指定轨迹数据的内容格式为 step 模式
+
+参数对应关系说明：
+- 当 YAML 配置中 `use_stepwise_advantage: false`（默认值）时，`RllmEngineWrapper` 初始化时需设置 `mode="Token"`
+- 当 YAML 配置中 `use_stepwise_advantage: True` 时，`RllmEngineWrapper` 初始化时需设置 `mode="Step"`
+
+请确保两个参数的配置保持一致，否则可能导致训练失败或结果不符合预期。
