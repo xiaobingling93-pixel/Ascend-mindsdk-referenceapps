@@ -1,0 +1,60 @@
+{
+  "skill_name": "sdk-security-audit",
+  "evals": [
+    {
+      "id": 1,
+      "name": "cpp-buffer-overflow-audit",
+      "prompt": "对当前仓库进行安全审计，重点关注内存安全问题",
+      "expected_output": "识别 SDK 入口，分析调用链，报告内存安全问题",
+      "files": [],
+      "assertions": [
+        {
+          "name": "识别 SDK 入口",
+          "description": "应该正确识别对外 SDK 入口函数"
+        },
+        {
+          "name": "证据链完整",
+          "description": "每个报告的问题应有完整的调用路径和代码位置"
+        },
+        {
+          "name": "无误报",
+          "description": "报告的问题应该有确凿证据，不应有臆测"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "python-security-audit",
+      "prompt": "审计 Python 代码的安全问题，检查输入验证和命令注入风险",
+      "expected_output": "识别 Python SDK 入口，检查危险函数使用，报告安全问题",
+      "files": [],
+      "assertions": [
+        {
+          "name": "识别 Python 危险函数",
+          "description": "应该检查 eval/exec/os.system 等危险函数"
+        },
+        {
+          "name": "输入验证检查",
+          "description": "应该检查外部输入是否经过验证"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "remote-repo-audit",
+      "prompt": "审计 https://github.com/nlohmann/json 仓库的 include/nlohmann 目录",
+      "expected_output": "克隆仓库，识别入口，审计安全问题",
+      "files": [],
+      "assertions": [
+        {
+          "name": "正确处理远程仓库",
+          "description": "应该克隆指定仓库并切换到正确目录"
+        },
+        {
+          "name": "限定扫描范围",
+          "description": "应该只报告指定目录内的问题"
+        }
+      ]
+    }
+  ]
+}
