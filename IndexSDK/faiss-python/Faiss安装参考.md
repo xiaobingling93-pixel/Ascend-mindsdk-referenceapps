@@ -12,6 +12,100 @@ pip3 install build
 # Faiss安装参考
 
 根据index版本，选择faiss的安装版本，index版本为5.0.0及以前版本，安装faiss1.7.1, index版本为6.0.0以后安装faiss1.7.4，index版本为7.1.0以后安装faiss1.10.0;
+如果使用26.0.0-beta.1 版本IndexSDK的IVFRaBitQ检索算法，需要安装faiss1.13.2版本（可选）。
+
+## 安装faiss1.13.2版本
+
+### 1、源码下载
+
+执行以下命令下载Faiss源码压缩包并解压。（编译该Faiss需要CMake的版本不低于CMake 3.24.0。）
+
+```
+wget https://github.com/facebookresearch/faiss/archive/refs/tags/v1.13.2.tar.gz
+tar -xf v1.13.2.tar.gz && cd faiss-1.13.2/faiss
+```
+
+### 2、部署安装脚本
+
+创建安装脚本文件
+
+```
+vi install_faiss_sh.sh
+```
+
+在安装脚本中添加以下内容
+
+```
+# modify source code
+# 步骤1：修改Faiss源码
+arch="$(uname -m)"
+if [ "${arch}" = "aarch64" ]; then
+  gcc_version="$(gcc -dumpversion)"
+  if [ "${gcc_version}" = "4.8.5" ];then
+    sed -i '20i /*' utils/simdlib.h
+    sed -i '24i */' utils/simdlib.h
+  fi
+fi
+sed -i "198 i\\
+    \\
+    virtual void search_with_filter (idx_t n, const float *x, idx_t k,\\
+                                     float *distances, idx_t *labels, const void *mask = nullptr) const {}\\
+" Index.h
+sed -i "60 i\\
+    \\
+template <typename IndexT>\\
+IndexIDMapTemplate<IndexT>::IndexIDMapTemplate (IndexT *index, std::vector<idx_t> &ids):\\
+    index (index),\\
+    own_fields (false)\\
+{\\
+    this->is_trained = index->is_trained;\\
+    this->metric_type = index->metric_type;\\
+    this->verbose = index->verbose;\\
+    this->d = index->d;\\
+    id_map = ids;\\
+}\\
+" IndexIDMap.cpp
+sed -i "30 i\\
+    \\
+    explicit IndexIDMapTemplate (IndexT *index, std::vector<idx_t> &ids);\\
+" IndexIDMap.h
+sed -i "217 i\\
+  utils/sorting.h
+" CMakeLists.txt
+# modify source code end
+cd ..
+ls
+# 步骤2：Faiss编译配置
+FAISS_INSTALL_PATH=/usr/local/faiss/faiss1.13.2
+cmake -B build . -DFAISS_ENABLE_GPU=OFF -DFAISS_ENABLE_PYTHON=OFF -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${FAISS_INSTALL_PATH}
+# 步骤3：编译安装
+cd build && make -j && make install
+cd ../.. && rm -f v1.13.2.tar.gz && rm -rf faiss-1.13.2
+```
+
+按“Esc”键，输入:wq!，按“Enter”保存并退出编辑
+
+### 3、源码编译安装
+
+1. 执行安装脚本完成faiss安装。
+
+   ```
+   bash install_faiss_sh.sh
+   ```
+
+2. 配置系统库查找路径，返回上层目录。
+
+   动态链接依赖Faiss的程序在运行时需要知道Faiss动态库所在路径，需要在Faiss的库目录加入“LD_LIBRARY_PATH”环境变量。
+
+   ```
+   # 配置/etc/profile
+   vim /etc/profile
+   # 在/etc/profile中添加: export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+   # /usr/local/lib是Faiss的安装目录,如果安装在其他目录下,将/usr/local/lib替换为Faiss实际安装路径（例如上文参考配置中的/usr/local/faiss/faiss1.13.2/lib），部分操作系统和环境中，faiss可能会安装在其他目录下。
+   source /etc/profile
+   cd ..
+   ```  
+
 
 ## 安装faiss1.10.0版本
 
