@@ -7,19 +7,18 @@ ARG PYTHON_VERSION=python3.11
 ARG TORCH_VERSION=2.1.0
 # 设置时区禁用交互式配置
 ENV DEBIAN_FRONTEND=noninteractive
-    
-RUN apt-get update && apt-get install -y software-properties-common && add-apt-repository -y ppa:deadsnakes/ppa && apt-get update
-RUN apt-get update && apt-get install -y vim tar zip unzip git curl wget dos2unix make gcc g++ ccache gfortran libssl-dev libpq-dev swig ffmpeg
 
-RUN apt-get update && apt-get install -y build-essential ${PYTHON_VERSION}  ${PYTHON_VERSION}-dev ${PYTHON_VERSION}-distutils ${PYTHON_VERSION}-venv 
-COPY ./package/urls.conf /tmp/urls.conf
-RUN . /tmp/urls.conf && curl $PYPI_URL | ${PYTHON_VERSION} &&  update-alternatives --install /usr/bin/python3 python3 /usr/bin/${PYTHON_VERSION} 1
+RUN apt-get update && apt-get install -y software-properties-common && add-apt-repository -y ppa:deadsnakes/ppa && apt-get update
+RUN apt-get update && apt-get install -y curl wget git git-lfs ca-certificates libssl-dev zlib1g-dev unzip tar gcc make cmake libffi-dev g++ libprotobuf-dev pkg-config build-essential libbz2-dev libreadline-dev libsqlite3-dev llvm xz-utils liblzma-dev libopenblas-dev vim gfortran libpq-dev swig ffmpeg
+
+RUN wget https://www.python.org/ftp/python/3.11.0/Python-3.11.0.tgz && tar -xzvf Python-3.11.0.tgz && cd Python-3.11.0 && ./configure --enable-optimizations --prefix=/usr/local && make && make install
+RUN ln -s /usr/local/bin/python3 /usr/local/bin/python && ln -s /usr/local/bin/pip3 /usr/local/bin/pip
 
 #配置 python3-config
-RUN ln -sf /usr/bin/${PYTHON_VERSION}-config /usr/local/bin/python3-config
+RUN ln -sf /usr/local/bin/${PYTHON_VERSION}-config /usr/local/bin/python3-config
 
 # 安装cmake
-RUN . /tmp/urls.conf && wget $CMAKE_URL && \
+RUN . /tmp/urls.conf && wget -q $CMAKE_URL && \
     tar -zxf cmake-3.24.3.tar.gz && \
     cd cmake-3.24.3 && \
     ./bootstrap && make -j && make install
@@ -46,7 +45,7 @@ RUN . /tmp/urls.conf && cd /tmp && \
 	cd OpenBLAS && \
 	git checkout v0.3.10 && \
     make FC=gfortran USE_OPENMP=1 -j && \
-	make PREFIX=${OPENBLAS_INSTALL_PATH} install 
+	make PREFIX=${OPENBLAS_INSTALL_PATH} install
 ENV LD_LIBRARY_PATH=${OPENBLAS_INSTALL_PATH}/lib:$LD_LIBRARY_PATH
 
 
@@ -59,7 +58,7 @@ RUN . /tmp/urls.conf && wget $FAISS_URL && \
     sed -i "49 i template <typename IndexT> IndexIDMapTemplate<IndexT>::IndexIDMapTemplate (IndexT *index, std::vector<idx_t> &ids): index (index), own_fields (false) { this->is_trained = index->is_trained; this->metric_type = index->metric_type; this->verbose = index->verbose; this->d = index->d; id_map = ids; }" IndexIDMap.cpp && \
     sed -i "30 i explicit IndexIDMapTemplate (IndexT *index, std::vector<idx_t> &ids);" IndexIDMap.h && \
     sed -i "217 i utils/sorting.h" CMakeLists.txt && \
-    cd .. && cmake -B build . -DFAISS_ENABLE_GPU=OFF -DPython_EXECUTABLE=/usr/bin/python3 -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${FAISS_INSTALL_PATH} && \
+    cd .. && cmake -B build . -DFAISS_ENABLE_GPU=OFF -DPython_EXECUTABLE=/usr/local/bin/python3 -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${FAISS_INSTALL_PATH} && \
     make -C build -j faiss && \
     make -C build -j swigfaiss && \
     cd build/faiss/python && python3 setup.py bdist_wheel && \
@@ -79,23 +78,22 @@ ARG MXINDEX_INSTALL_PATH=/usr/local/Ascend/mxIndex
 
 COPY ./package/driver /usr/local/Ascend/driver
 
-
-# 安装toch_npu
-#RUN pip3 install torch-${TORCH_VERSION}*_${ARCH}.whl && pip3 install torch_npu-${TORCH_VERSION}*_${ARCH}.whl
-RUN pip3 install torch-npu=="${TORCH_VERSION}".post8
+# 安装torch
+RUN pip3 install torch=="${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+# 安装torch-npu
+RUN pip3 install torch-npu=="${TORCH_VERSION}".post13
 
 # 安装mxrag
 COPY ./package/Ascend-mindxsdk-mxrag_*_linux-${ARCH}.run /tmp/
 RUN bash /tmp/Ascend-mindxsdk-mxrag_*_linux-${ARCH}.run --install --install-path=/usr/local/Ascend --quiet --platform=${PLATFORM}
 RUN pip3 install -r /usr/local/Ascend/mxRag/requirements.txt
-RUN pip3 install torch-npu=="${TORCH_VERSION}".post12 pymilvus==2.5.12
 # 安装mxrag第三方依赖
-RUN pip3 install rank_bm25==0.2.2 readability_lxml==0.8.1 html_text==0.6.2 gradio==3.50.2 streamlit
+RUN pip3 install rank_bm25==0.2.2 langchain-opengauss==0.1.5 streamlit mineru numpy==1.26.4 fastapi
 #清理临时目录
 
 # 添加环境变量
 RUN sed -i '$a\export PYTHONPATH=/root/.local/lib/$PYTHON_VERSION/site-packages/mx_rag/libs/:$PYTHONPATH' /root/.bashrc  && \
-    sed -i '$a\export LD_PRELOAD=$(ls /usr/local/lib/$PYTHON_VERSION/dist-packages/scikit_learn.libs/libgomp-*):$LD_PRELOAD' /root/.bashrc && \
+    sed -i '$a\export LD_PRELOAD=$(ls /usr/local/lib/$PYTHON_VERSION/site-packages/scikit_learn.libs/libgomp-*):$LD_PRELOAD' /root/.bashrc && \
 	sed -i '$a\source /usr/local/Ascend/mxRag/script/set_env.sh' /root/.bashrc && \
     sed -i '$a\export LD_LIBRARY_PATH=/usr/local/Ascend/mxIndex/lib:/usr/local/faiss/faiss1.10.0/lib:$LD_LIBRARY_PATH' /root/.bashrc && \
     sed -i '$a\export PATH=/usr/local/bin:$PATH' /root/.bashrc && \
@@ -105,7 +103,6 @@ RUN sed -i '$a\export PYTHONPATH=/root/.local/lib/$PYTHON_VERSION/site-packages/
     sed -i '$a\export MX_INDEX_INSTALL_PATH=/usr/local/Ascend/mxIndex' /root/.bashrc && \
     sed -i 's/$PYTHON_VERSION/'"$PYTHON_VERSION"'/g' /root/.bashrc && \
 	sed -i '$a\export LOGURU_FORMAT="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message!r}</level>"' /root/.bashrc
-    
 
 USER HwHiAiUser:HwHiAiUser
 
@@ -119,7 +116,7 @@ RUN bash /tmp/Ascend-mindxsdk-mxrag_*_linux-${ARCH}.run --install --install-path
 
 # 添加环境变量 for HwHiAiUser用户
 RUN sed -i '$a\export PYTHONPATH=/home/HwHiAiUser/.local/lib/$PYTHON_VERSION/site-packages/mx_rag/libs/:$PYTHONPATH' /home/HwHiAiUser/.bashrc  && \
-    sed -i '$a\export LD_PRELOAD=$(ls /usr/local/lib/$PYTHON_VERSION/dist-packages/scikit_learn.libs/libgomp-*):$LD_PRELOAD' /home/HwHiAiUser/.bashrc && \
+    sed -i '$a\export LD_PRELOAD=$(ls /usr/local/lib/$PYTHON_VERSION/site-packages/scikit_learn.libs/libgomp-*):$LD_PRELOAD' /home/HwHiAiUser/.bashrc && \
 	sed -i '$a\source /home/HwHiAiUser/Ascend/mxRag/script/set_env.sh' /home/HwHiAiUser/.bashrc && \
     sed -i '$a\export LD_LIBRARY_PATH=/home/HwHiAiUser/Ascend/mxIndex/lib:/usr/local/faiss/faiss1.10.0/lib:$LD_LIBRARY_PATH' /home/HwHiAiUser/.bashrc && \
 	sed -i '$a\export PATH=/usr/local/bin:$PATH' /home/HwHiAiUser/.bashrc && \
