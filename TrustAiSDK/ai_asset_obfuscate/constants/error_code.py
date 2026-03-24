@@ -42,6 +42,7 @@ class ErrorCode(Enum):
     MODEL_CONFIG_INVALID_TEXT_CONFIG = (1028, "The model config text_config validation failed.")
     MODEL_CONFIG_INVALID_VISION_CONFIG = (1029, "The model config vision_config type validation failed.")
     MODEL_CONFIG_INVALID_DEPTH = (1030, "The model config vision_config type validation failed.")
+    MODEL_CONFIG_INVALID = (1031, "The model config validation failed.")
     ENCRYPT_FAILED = (2001, "Encryption passwd failed.")
     DECRYPT_FAILED = (2002, "Decryption passwd failed.")
     CREATE_SEED_FAILED = (2003, "Create obfuscate seed failed.")
@@ -52,6 +53,7 @@ class ErrorCode(Enum):
     MODEL_PATH_FAILED = (3004, "Please use create_model_obfuscation() or create_custom_model_obfuscation() instead.")
     WHITE_LIST_CHECK_FAILED = (3005, "Failed to verify the white list.")
     FOUND_INDEX_JSON_ERROR = (3006, "Found multiple .index.json files.")
+    FOUND_MODEL_WEIGHT_ERROR = (3007, "Failed to find model weight.")
     UNSUPPORTED_OP_TYPE = (4001, "The op_type is not supported on the model shape.")
     INVALID_FLAG = (5001, "The flag validation failed.")
     MODEL_ALREADY_OBFUSCATED = \
@@ -75,6 +77,7 @@ class ErrorCode(Enum):
     APPLY_OBFUSCATION_FAILED = (5017, "Failed to apply weight obfuscation.")
     OBFUSCATOR_NOT_INITIALIZED = (5018, "Obfuscator is not initialized.")
     INVALID_ELEMENT_SIZE = (5019, "Invalid element size for data type.")
+    UNSUPPORTED_DTYPE = (5020, "The dtype is not supported.")
 
 
     @property

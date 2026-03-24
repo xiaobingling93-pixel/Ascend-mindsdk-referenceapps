@@ -16,14 +16,11 @@ from ...exception import ObfException
 
 # 映射torch dtype到numpy dtype
 TORCH_TO_NP_DTYPE = {
+    torch.bfloat16: np.float32,
     torch.float32: np.float32,
     torch.float16: np.float16,
-    torch.float64: np.float64,
     torch.int8: np.int8,
-    torch.int16: np.int16,
-    torch.int32: np.int32,
-    torch.int64: np.int64,
-    torch.uint8: np.uint8,
+    torch.int32: np.int32
 }
 
 # 定义torch dtype到DType枚举的映射
@@ -31,6 +28,8 @@ TORCH_TO_DTYPE_ENUM = {
     torch.bfloat16: DType.BFLOAT16.value,
     torch.float16: DType.FLOAT16.value,
     torch.float32: DType.FLOAT32.value,
+    torch.int8: DType.INT8.value,
+    torch.int32: DType.INT32.value
 }
 
 
@@ -166,9 +165,6 @@ def apply_weight_obfuscation(obfuscator_ptr, weight_bytes, operation):
     Raises:
         ObfException: 混淆失败时抛出异常
     """
-    # 在函数最开始打印日志
-    log.info(f"[PY] apply_weight_obfuscation: ENTRY - obfuscator_ptr={obfuscator_ptr}")
-
     # 准备输入数据 - 优化：直接转换bytes为ctypes数组，避免中间bytearray副本
     weight_len = len(weight_bytes)
     if isinstance(weight_bytes, bytes):
@@ -182,9 +178,6 @@ def apply_weight_obfuscation(obfuscator_ptr, weight_bytes, operation):
 
     # 创建输出缓冲区（保持在函数作用域内）
     output_buffer = (c_uint8 * weight_len)()
-
-    # 调用C++接口执行混淆
-    log.info("[PY] apply_weight_obfuscation: calling C++ ApplyWeightObfuscation...")
 
     # 使用 try-except 捕获 ctypes 调用错误
     try:

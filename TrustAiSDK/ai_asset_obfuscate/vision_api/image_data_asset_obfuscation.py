@@ -43,6 +43,7 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         self.shortest_edge = shortest_edge
         self.temporal_patch_size = temporal_patch_size
         self.factor = self.patch_size * self.merge_size
+        self.is_seed_content = False
 
     @staticmethod
     def _to_rgb(pil_image: Image.Image) -> Image.Image:
@@ -200,6 +201,9 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         :param image: base64编码格式的图片数据
         :return: 混淆后图片的base64编码
         """
+        if not self.is_seed_content:
+            log.error("The seed content is not set.")
+            raise ObfException(ErrorCode.SEED_CONTENT_NOT_SET.value)
         base64_prefix, pil_img = self._validate_base64_image(image)
 
         try:
@@ -221,6 +225,9 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         :param image: bytearray格式图片流
         :return: 混淆后的bytearray格式图片流
         """
+        if not self.is_seed_content:
+            log.error("The seed content is not set.")
+            raise ObfException(ErrorCode.SEED_CONTENT_NOT_SET.value)
 
         if not isinstance(image, bytearray) or len(image) > Constant.MAX_BYTES_IMAGE_LENGTH * 1024 * 1024:
             log.error("The image data type or length validation failed.")
@@ -300,4 +307,5 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         except ObfException as e:
             return e.code, e.message
         log.info("Set seed core successful.")
+        self.is_seed_content = True
         return ErrorCode.SUCCESS.value

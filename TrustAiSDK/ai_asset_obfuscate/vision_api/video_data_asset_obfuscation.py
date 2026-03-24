@@ -50,6 +50,7 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         self.factor = self.patch_size * self.merge_size
         self.num_frames = num_frames
         self.fps = -1
+        self.is_seed_content = False
 
     @staticmethod
     def _smart_resize(
@@ -199,6 +200,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         :param video: base64编码格式的视频数据
         :return: 混淆后视频的base64编码
         """
+        if not self.is_seed_content:
+            log.error("The seed content is not set.")
+            raise ObfException(ErrorCode.SEED_CONTENT_NOT_SET.value)
         if not isinstance(fps, int):
             log.error("The parameters for visual data preprocessing must be of int type.")
             raise ObfException(ErrorCode.INVALID_PARAM.value)
@@ -223,6 +227,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         :param video: bytearray格式视频流
         :return: 混淆后的bytearray格式视频流
         """
+        if not self.is_seed_content:
+            log.error("The seed content is not set.")
+            raise ObfException(ErrorCode.SEED_CONTENT_NOT_SET.value)
         if not isinstance(fps, int):
             log.error("The parameters for visual data preprocessing must be of int type.")
             raise ObfException(ErrorCode.INVALID_PARAM.value)
@@ -329,6 +336,7 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         except ObfException as e:
             return e.code, e.message
         log.info("Set seed core successful.")
+        self.is_seed_content = True
         return ErrorCode.SUCCESS.value
     
     def _sample_frames(self, total_frames: int, fps) -> list:
