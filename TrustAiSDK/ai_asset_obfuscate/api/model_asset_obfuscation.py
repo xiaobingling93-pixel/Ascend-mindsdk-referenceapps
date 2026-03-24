@@ -33,16 +33,31 @@ from ..utils.c_utils.obf_api import (create_weight_obfuscator, destroy_weight_ob
 
 def parse_model_weight(model_path):
     files = glob.glob(os.path.join(model_path, "*.index.json"))
-    if len(files) == 0:
-        log.warning("The file suffix is [index.json] is not exist, use the empty map.")
-        return None
-    elif len(files) > 1:
+    if len(files) > 1:
         log.error("Found multiple files that suffix is [index.json].")
         raise ObfException(ErrorCode.FOUND_INDEX_JSON_ERROR.value)
-    else:
+    if len(files) == 1:
         index_path = files[0]
-    index_json = load_json(index_path)
-    return index_json.get('weight_map', None)
+        index_json = load_json(index_path)
+        weight_map = index_json.get('weight_map', None)
+        if weight_map is not None:
+            return weight_map
+        else:
+            log.warning("The index.json file is none, try to generate weight json.")
+            return generate_weight_map(model_path)
+    else:
+        log.warning("The file suffix is [index.json] is not exist, try to generate weight json.")
+        return generate_weight_map(model_path)
+
+
+def generate_weight_map(model_path):
+    safetensors_files = glob.glob(os.path.join(model_path, "*.safetensors"))
+    if len(safetensors_files) != 1:
+        raise ObfException(ErrorCode.FOUND_MODEL_WEIGHT_ERROR.value)
+    with safe_open(safetensors_files[0], framework="pt", device="cpu") as f:
+        keys = f.keys()
+    filename = os.path.basename(safetensors_files[0])
+    return {key: filename for key in keys}
 
 
 def load_json(input_path: str) -> json:
@@ -174,7 +189,9 @@ class ObfParam:
     def __init__(self, precision_mode, model_save_path, device_type, device_id):
         self.precision_mode = precision_mode
         self.model_save_path = model_save_path
-        self.device_type = device_type
+        if device_type == 'npu':
+            log.warning("The device does not support the NPU currently and will be switched to the CPU.")
+        self.device_type = 'cpu'
         self.device_id = device_id
 
     def get_current_device_type(self, current_device_id):
@@ -220,7 +237,7 @@ def _check_save_path(model_save_path) -> bool:
         log.error("The [model_save_path] is not exist or can not be write.")
         return False
     if target.exists():
-        if target.is_file() or (target.is_dir() and os.listdir(target)):
+        if target.is_file():
             log.error("The [model_save_path] is a file or is a non-empty dir.")
             return False
     return True
@@ -324,7 +341,7 @@ class ModelAssetObfuscation(AssetObfuscation):
     num_experts = None
     depth = None
     vision_hidden_size = None
-    c_obfuscator = None  # C++混淆器对象引用
+    c_obfuscators_map = {}  # C++混淆器对象字典，key为seed_type
 
     def __init__(self):
         if self.model_path is None:  # 防止直接调用init方法
@@ -410,17 +427,13 @@ class ModelAssetObfuscation(AssetObfuscation):
         model_config_path = os.path.join(self.model_path, 'config.json')
         flag_config_path = os.path.join(self.model_path, 'obf_config.json')
         # 加载配置文件各项属性并校验
-        if parameter_validation_file(model_config_path):
-            self._parse_model_config(model_config_path)
-            self._validate()
-            check_white_list(params.token_white_list, self.vocab_size)
-            self.white_set = [] if params.token_white_list is None else set(params.token_white_list)
+        self._validate_model_config(model_config_path, params)
         if parameter_validation_file(flag_config_path):
             self.flag_config_path = flag_config_path
             self.flag = self._read_current_flag(self.flag_config_path)
         else:
             self.flag = Constant.UNCONFUSED
-        self.c_obfuscator = None  # 初始化C++混淆器对象引用
+        self.c_obfuscators_map = {}  # 初始化C++混淆器对象字典
         return self
 
     def set_seed_content(self, seed_type: int = Constant.MODEL_SEED_TYPE, seed_content: str = None,
@@ -491,28 +504,48 @@ class ModelAssetObfuscation(AssetObfuscation):
             log.error("Failed to obfuscation the model weight.")
             return e.code, e.message
         finally:
-            if self.c_obfuscator is not None:
-                destroy_weight_obfuscator(self.c_obfuscator)
-                self.c_obfuscator = None
+            for obfuscator in self.c_obfuscators_map.values():
+                if obfuscator is not None:
+                    destroy_weight_obfuscator(obfuscator)
+            self.c_obfuscators_map.clear()
+    
+    def _generate_c_config(self):
+        obf_config = ObfConfig()
+        obf_config.hidden_size = self.hidden_size or 0
+        obf_config.vocab_size = self.vocab_size or 0
+        obf_config.intermediate_size = self.intermediate_size or 0
+        obf_config.moe_intermediate_size = self.moe_intermediate_size or 0
+        obf_config.head_dim = self.head_dim or 0
+        obf_config.num_attention_heads = self.num_attention_heads or 0
+        obf_config.vision_hidden_size = self.vision_hidden_size or 0
+        obf_config.tp_num = self.tp_num
+        obf_config.obf_coefficient = self.obf_coefficient
+        obf_config.is_obfuscation = self.is_obfuscation
+        return obf_config
 
     def _obf_core(self, obf_type, obf_param) -> (int, str):
         # 找到所有需要加载的模型文件
         all_model_name = self._get_models()
-        if obf_param.device_type == 'npu':
-            futures = []
-            # 遍历 all_model_name，为每个元素启动一个线程池执行任务.
-            for idx, model_name in enumerate(all_model_name):
-                future = (thread_pools[idx % len(obf_param.device_id)]
-                          .submit(self._obf_each_model, obf_type, model_name, obf_param,
-                                  obf_param.device_id[idx % len(obf_param.device_id)]))
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        max_workers = min(len(all_model_name), os.cpu_count())
+        futures = []
+        with ThreadPoolExecutor(max_workers) as executor:
+            for model_name in all_model_name:
+                future = executor.submit(
+                    self._obf_each_model,
+                    obf_type,
+                    model_name,
+                    obf_param,
+                    obf_param.device_id,
+                )
                 futures.append(future)
-            # 等待所有任务完成或超时
+            # 异常处理和任务监控
             done, not_done = wait(futures, return_when=FIRST_EXCEPTION)
             for future in not_done:
                 future.cancel()
             for future in futures:
                 try:
-                    future.result()
+                    future.result()  # 获取结果
                 except ObfException as e:
                     log.error("The task in the thread pool has failed due to confusion.")
                     return e.code, e.message
@@ -520,13 +553,6 @@ class ModelAssetObfuscation(AssetObfuscation):
                     log.error(f"Some threads failed to execute and were canceled: {e}")
                     return ErrorCode.FAILED.value
             return ErrorCode.SUCCESS.value
-        else:
-            try:
-                for model_name in all_model_name:
-                    self._obf_each_model(obf_type, model_name, obf_param, obf_param.device_id)
-                return ErrorCode.SUCCESS.value
-            except ObfException as e:
-                return e.code, e.message
 
     def _obf_each_model(self, obf_type, model_name, obf_param, current_device_id):
         # 拼接模型加载路径
@@ -568,40 +594,44 @@ class ModelAssetObfuscation(AssetObfuscation):
         else:
             self._obf_model_by_obf_config(obf_param, model_obf_param, self.obf_config_map[Constant.DATA_SEED_TYPE])
 
+    def _get_seed_type_by_config(self, obf_config):
+        """根据配置字典找到对应的seed_type"""
+        for seed_type, config in self.obf_config_map.items():
+            if config == obf_config:
+                return seed_type
+        log.error("Cannot find seed_type for the given obf_config.")
+        raise ObfException(ErrorCode.OBFUSCATOR_NOT_INITIALIZED.value)
+
     def _obf_model_by_obf_config(self, obf_param, model_obf_param, obf_config):
-        if self.c_obfuscator is None:
+        # 根据配置字典找到对应的seed_type
+        seed_type = self._get_seed_type_by_config(obf_config)
+        if seed_type not in self.c_obfuscators_map:
             log.error("C++ obfuscator not initialized. Call set_seed_content() first.")
             raise ObfException(ErrorCode.OBFUSCATOR_NOT_INITIALIZED.value)
-
-        # 反转操作顺序用于解混淆
-        reverse_ops = self.is_obfuscation
-
-        if self.weight_map is None:
-            for weight_name, obf_ops in obf_config.items():
-                model_obf_param.set_weight_name(weight_name)
-                obf_ops = get_reversed(obf_ops, reverse_ops)
-                self._apply_weight_obf(model_obf_param, obf_ops, obf_param)
-            return
         for weight_name, obf_ops in obf_config.items():
+            obf_ops = obf_ops if self.is_obfuscation else obf_ops[::-1]
             if weight_name not in self.weight_map:
-                log.warning("The weight name is not in safetensors weight map.")
+                log.warning(f"The weight name is not in safetensors weight map, weight name :{weight_name}.")
                 continue
             model_obf_param.set_weight_name(weight_name)
-            model_weight_value = self.weight_map[weight_name]
-            obf_ops = get_reversed(obf_ops, reverse_ops)
-            if not isinstance(model_weight_value, List):
-                self._obf_model_match_target(obf_param, model_obf_param, obf_ops, model_weight_value)
+            weight_value = self.weight_map[weight_name]
+            if not isinstance(weight_value, List):
+                self._obf_model_match_target(model_obf_param, obf_ops, obf_param, weight_value, seed_type)
             else:
-                for target_model in model_weight_value:
-                    self._obf_model_match_target(obf_param, model_obf_param, obf_ops, target_model)
+                for target_model in weight_value:
+                    self._obf_model_match_target(model_obf_param, obf_ops, obf_param, target_model, seed_type)
 
-    def _obf_model_match_target(self, obf_param, model_obf_param, obf_ops, model_weight_value):
-        if model_weight_value.find(model_obf_param.model_name) == -1:
+    def _obf_model_match_target(self, model_obf_param, obf_ops, obf_param, target_model, seed_type):
+        if target_model.find(model_obf_param.model_name) == -1:
             return
-        model_obf_param.set_model_backbone(model_weight_value)
-        self._apply_weight_obf(model_obf_param, obf_ops, obf_param)
+        model_obf_param.set_model_backbone(target_model)
+        if model_obf_param.get_model_weight() is not None:
+            self._apply_weight_obf(model_obf_param, obf_ops, obf_param, seed_type)
+        else:
+            log.warning(f"The weight name is not exists in model file, weight name :{model_obf_param.weight_name}, "
+                        f"model file {model_obf_param.model_name}.")
 
-    def _apply_weight_obf(self, model_obf_param, obf_ops, obf_param):
+    def _apply_weight_obf(self, model_obf_param, obf_ops, obf_param, seed_type):
         """使用C++混淆接口对模型权重进行混淆"""
         model_weight = model_obf_param.get_model_weight()
         if model_weight is None:
@@ -613,26 +643,20 @@ class ModelAssetObfuscation(AssetObfuscation):
         weight_tensor = model_weight.cpu().float() if original_dtype == torch.bfloat16 else model_weight.cpu()
         conversion_dtype = TORCH_TO_NP_DTYPE.get(original_dtype)
         if conversion_dtype is None:
-            log.warning(f"Unsupported dtype {original_dtype}, using float32 as fallback")
-            weight_tensor = weight_tensor.float()
-            conversion_dtype = np.float32
+            log.error(f"Unsupported dtype for input weight: {original_dtype}")
+            raise ObfException(ErrorCode.UNSUPPORTED_DTYPE.value)
         weight_bytes = weight_tensor.numpy().tobytes()
-        # 创建输出缓冲区
-        output_buffer = bytearray(len(weight_bytes))
-
         # 对每个操作应用混淆
         for obf_op in obf_ops:
             # 检查操作格式
             self._check_obf_op(obf_op)
             # 准备ObfOperation结构
             operation = ObfOperation(obf_op, original_dtype, original_shape)
-            # 调用C++混淆接口
-            input_data = weight_bytes if obf_op == obf_ops[0] else output_buffer
-            output_buffer = apply_weight_obfuscation(self.c_obfuscator, input_data, operation)
+            weight_bytes = apply_weight_obfuscation(self.c_obfuscators_map[seed_type], weight_bytes, operation)
 
         # 使用conversion_dtype来解析bytes（因为可能发生了dtype转换）
         try:
-            obf_array = np.frombuffer(output_buffer, dtype=conversion_dtype).copy()
+            obf_array = np.frombuffer(weight_bytes, dtype=conversion_dtype).copy()
         except Exception as np_error:
             raise ObfException(ErrorCode.APPLY_OBFUSCATION_FAILED.value) from np_error
         obf_tensor = torch.from_numpy(obf_array).reshape(original_shape).to(original_dtype)
@@ -649,6 +673,17 @@ class ModelAssetObfuscation(AssetObfuscation):
         if obf_type not in [Constant.OBF_BY_ALL_SEED, Constant.OBF_BY_MODEL_SEED, Constant.OBF_BY_DATA_SEED]:
             log.error("The [obf_type] is invalid.")
             raise ObfException(ErrorCode.INVALID_OBF_TYPE.value)
+        if (obf_type == Constant.OBF_BY_ALL_SEED and (
+                self.c_obfuscators_map.get(Constant.MODEL_SEED_TYPE) is None or
+                self.c_obfuscators_map.get(Constant.DATA_SEED_TYPE) is None)):
+            log.error("The model or data seed is not set.")
+            raise ObfException(ErrorCode.UNMATCHED_OBF_TYPE.value)
+        if obf_type == Constant.MODEL_SEED_TYPE and self.c_obfuscators_map.get(Constant.MODEL_SEED_TYPE) is None:
+            log.error("The model seed is not set.")
+            raise ObfException(ErrorCode.UNMATCHED_OBF_TYPE.value)
+        if obf_type == Constant.DATA_SEED_TYPE and self.c_obfuscators_map.get(Constant.DATA_SEED_TYPE) is None:
+            log.error("The data seed is not set.")
+            raise ObfException(ErrorCode.UNMATCHED_OBF_TYPE.value)
 
     def _check_flag_obf(self, obf_type):
         if self.flag == Constant.MODEL_CONFUSED and obf_type != Constant.OBF_BY_DATA_SEED:
@@ -781,7 +816,7 @@ class ModelAssetObfuscation(AssetObfuscation):
         raise ObfException(ErrorCode.INVALID_PARAM.value)
 
     def _preprocessing_save_path(self, model_save_path):
-        if model_save_path is None:
+        if model_save_path is None or model_save_path == self.model_path:
             return self.model_path
         if os.path.islink(model_save_path):
             log.error("The [model_save_path] is a soft link.")
@@ -814,13 +849,14 @@ class ModelAssetObfuscation(AssetObfuscation):
         self._add_white_list_for_config(obf_c_config)
 
         try:
-            self.c_obfuscator = create_weight_obfuscator(seed_content_bytes, obf_c_config)
+            # 创建C++混淆器对象
+            self.c_obfuscators_map[seed_type] = create_weight_obfuscator(seed_content_bytes, obf_c_config)
             return ErrorCode.SUCCESS.value
         except Exception as e:
             log.error(f"Failed to create C obfuscator.: {e}")
-            if self.c_obfuscator is not None:
-                destroy_weight_obfuscator(self.c_obfuscator)
-                self.c_obfuscator = None
+            if self.c_obfuscators_map.get(seed_type) is not None:
+                destroy_weight_obfuscator(self.c_obfuscators_map[seed_type])
+                self.c_obfuscators_map[seed_type] = None
             return ErrorCode.CREATE_OBFUSCATOR_FAILED.value
         finally:
             clean_bytearray(seed_content_bytes)
@@ -858,6 +894,16 @@ class ModelAssetObfuscation(AssetObfuscation):
         except ObfException as e:
             return e.code, e.message
 
+    def _process_head_and_norm(self, key, current_value):
+        is_moe_and_vis_model = self._is_moe_model() or self._is_vision_model()
+        # moe和vl不处理
+        if is_moe_and_vis_model:
+            return current_value
+        if key != "lm_head.weight" and key != "model.norm.weight":
+            return current_value
+        current_value = [x for x in current_value if x not in [[7, 0], [7, 1]]]
+        return current_value
+
     def _assemble_completion_cfg(self, obf_json, obf_config_name):
         if not is_assemble_cfg(obf_json):
             return obf_json
@@ -873,7 +919,7 @@ class ModelAssetObfuscation(AssetObfuscation):
                 current_value = list(value)
                 if self._is_moe_model() and self._is_vision_model() and moe_mapping:
                     self._add_rule_for_key(key, moe_mapping, current_value)
-                expanded_dict[key] = current_value
+                expanded_dict[key] = self._process_head_and_norm(key, current_value)
 
         return expanded_dict
 
@@ -904,9 +950,24 @@ class ModelAssetObfuscation(AssetObfuscation):
     def _process_moe_index(self, new_key, current_value, i):
         """去除moe模型第0层,q,k,v的第1层[7,0]或[7,1]"""
         if not self._is_moe_model():
-            return current_value
+            return self._process_no_moe_model(new_key, current_value, i)
+        # 去除moe model.layers.1.input_layernorm.weight [7, 0]
         if i == 0 or (i == 1 and self._has_any_qkv_weight(new_key)):
             current_value = [x for x in current_value if x not in [[7, 1], [7, 0]]]
+            return current_value
+        if i == 1 and "input_layernorm.weight" in new_key:
+            current_value = [x for x in current_value if x not in [[7, 0]]]
+        return current_value
+
+    def _process_no_moe_model(self, new_key, current_value, i):
+        if self._is_vision_model():
+            return current_value
+        if i == 0 and self._has_any_qkv_weight(new_key):
+            seen = []
+            current_value = [x for x in current_value if tuple(x) not in seen and not seen.append(tuple(x))]
+            return current_value
+        # 去除除了qkv第0层的[7, 0], [7, 1]
+        current_value = [x for x in current_value if x not in [[7, 1], [7, 0]]]
         return current_value
 
     def _process_expert_keys(self, tmp_key, value, expanded_dict, obf_config_name, i):
@@ -1011,17 +1072,21 @@ class ModelAssetObfuscation(AssetObfuscation):
             raise ObfException(ErrorCode.MODEL_CONFIG_INVALID_VISION_CONFIG.value)
         self.depth = vision_config.get('depth')
         self.vision_hidden_size = vision_config.get('hidden_size')
-    
-    def _generate_c_config(self):
-        obf_config = ObfConfig()
-        obf_config.hidden_size = self.hidden_size or 0
-        obf_config.vocab_size = self.vocab_size or 0
-        obf_config.intermediate_size = self.intermediate_size or 0
-        obf_config.moe_intermediate_size = self.moe_intermediate_size or 0
-        obf_config.head_dim = self.head_dim or 0
-        obf_config.num_attention_heads = self.num_attention_heads or 0
-        obf_config.vision_hidden_size = self.vision_hidden_size or 0
-        obf_config.tp_num = self.tp_num
-        obf_config.obf_coefficient = self.obf_coefficient
-        obf_config.is_obfuscation = self.is_obfuscation
-        return obf_config
+
+    def _is_vit_model(self):
+        for filename in os.listdir(self.model_path):
+            file_path = os.path.join(self.model_path, filename)
+            if os.path.isfile(file_path) and filename.endswith(".pth"):
+                return True
+        return False
+
+    def _validate_model_config(self, model_config_path, params):
+        if parameter_validation_file(model_config_path):
+            self._parse_model_config(model_config_path)
+            self._validate()
+            check_white_list(params.token_white_list, self.vocab_size)
+            self.white_set = [] if params.token_white_list is None else set(params.token_white_list)
+        else:
+            if not self._is_vit_model():
+                log.error("The model configuration file does not exist.")
+                raise ObfException(ErrorCode.MODEL_CONFIG_INVALID.value)

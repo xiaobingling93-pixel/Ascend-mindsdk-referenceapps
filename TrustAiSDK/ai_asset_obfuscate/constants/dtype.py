@@ -10,3 +10,5 @@ class DType(Enum):
     BFLOAT16 = 0  # Brain Floating Point 16-bit (2 bytes)
     FLOAT16 = 1   # Half Precision Floating Point (2 bytes)
     FLOAT32 = 2   # Single Precision Floating Point (4 bytes)
+    INT8 = 3      # 1 byte
+    INT32 = 4     # 4 bytes
