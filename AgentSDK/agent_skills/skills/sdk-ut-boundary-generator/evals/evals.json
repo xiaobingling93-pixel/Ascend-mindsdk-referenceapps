@@ -1,0 +1,23 @@
+{
+  "skill_name": "sdk-ut-boundary-generator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "为 d:\\tmp\\SDK 仓库中的SDK函数生成UT边界测试用例",
+      "expected_output": "生成包含边界测试用例的报告，覆盖空值、边界值、非法输入等场景",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "分析 src/sdk/api.cpp 中的 ProcessData 函数，生成GTest边界测试用例",
+      "expected_output": "生成GTest格式的测试代码，包含空指针、边界值、异常等测试",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "为Python SDK模块 utils.py 生成pytest边界测试用例",
+      "expected_output": "生成pytest格式的测试代码，使用参数化测试覆盖边界场景",
+      "files": []
+    }
+  ]
+}
