@@ -28,7 +28,7 @@ from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_opengauss import OpenGaussSettings
-from langchain_opengauss.OpenGaussAGEGraph import OpenGaussAGEGraph
+from langchain_opengauss.openGaussAGEGraph import openGaussAGEGraph
 from mx_rag.document import LoaderMng
 from mx_rag.document.loader import DocxLoader, PdfLoader, ExcelLoader, PowerPointLoader
 from mx_rag.embedding.service import TEIEmbedding
@@ -523,7 +523,7 @@ def get_pipeline():
         graph_conf = OpenGaussSettings(user=st.session_state.oguser, password=st.session_state.ogpassword,
                                        host=st.session_state.oghost, port=st.session_state.ogport,
                                        database=st.session_state.ogdatabase)
-        age_graph = OpenGaussAGEGraph(graph_name, graph_conf)
+        age_graph = openGaussAGEGraph(graph_name, graph_conf)
     else:
         age_graph = None
     pipeline = GraphRAGPipeline(work_dir, llm, embedding_model, st.session_state.embedding_dim,

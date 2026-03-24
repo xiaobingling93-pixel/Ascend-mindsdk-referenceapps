@@ -41,7 +41,7 @@ WORKDIR /tmp
 # 安装torch
 RUN pip3 install torch=="${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu 
 # 安装torch-npu
-RUN pip3 install torch-npu=="${TORCH_VERSION}".post8
+RUN pip3 install torch-npu=="${TORCH_VERSION}".post13
 
 
 #安装CANN 依赖
@@ -101,12 +101,12 @@ RUN bash /tmp/Ascend-mindxsdk-mxrag_*_linux-${ARCH}.run --install --install-path
 # 安装cann-toolkit和kernel
 RUN wget -q http://172.17.0.1:3000/Ascend-cann-toolkit_${CANN_VERSION}_linux-aarch64.run -P /tmp && \
 	platform=$(echo $PLATFORM | tr '[A-Z]' '[a-z]') && \
-    wget -q http://172.17.0.1:3000/Ascend-cann-kernels-${platform}_${CANN_VERSION}_linux-aarch64.run -P /tmp && \
+    wget -q http://172.17.0.1:3000/Ascend-cann-${platform}-ops_${CANN_VERSION}_linux-aarch64.run -P /tmp && \
     wget -q http://172.17.0.1:3000/Ascend-cann-nnal_${CANN_VERSION}_linux-aarch64.run -P /tmp
 
 
 RUN bash /tmp/Ascend-cann-toolkit*_linux-${ARCH}.run --install --quiet
-RUN bash /tmp/Ascend-cann-kernels*_linux-${ARCH}.run --install --quiet
+RUN bash /tmp/Ascend-cann-*ops*_linux-${ARCH}.run --install --quiet
 
 # 安装nnal
 RUN bash -c "source /usr/local/Ascend/ascend-toolkit/set_env.sh && bash /tmp/Ascend-cann-nnal*_linux-${ARCH}.run --install --quiet"
