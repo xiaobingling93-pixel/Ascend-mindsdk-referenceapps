@@ -527,7 +527,7 @@ class ModelAssetObfuscation(AssetObfuscation):
         # 找到所有需要加载的模型文件
         all_model_name = self._get_models()
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        max_workers = min(len(all_model_name), os.cpu_count())
+        max_workers = min(len(all_model_name), min(os.cpu_count(), Constant.MAX_THREADS)) # 最大 32 线程并发
         futures = []
         with ThreadPoolExecutor(max_workers) as executor:
             for model_name in all_model_name:
