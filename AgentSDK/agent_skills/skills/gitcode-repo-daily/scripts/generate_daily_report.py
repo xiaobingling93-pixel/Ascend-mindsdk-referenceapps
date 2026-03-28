@@ -975,3 +975,516 @@ def _md_pr_link(owner_repo, number, title="", extra=""):
     if extra:
         parts.append(extra)
     return " ".join(parts)
+
+
+def _build_global_table(report):
+    g = report.get("global") or {}
+
+    def _delta_str(val):
+        if val is None:
+            return "—"
+        return ("+" if val >= 0 else "") + str(val)
+
+    stale_issues = g.get("stale_issues_total", 0) or 0
+    stale_prs = g.get("stale_prs_total", 0) or 0
+    errs = g.get("fetch_errors") or []
+    anomaly_parts = []
+    if stale_issues:
+        anomaly_parts.append("陈旧 Issue %s 个" % stale_issues)
+    if stale_prs:
+        anomaly_parts.append("陈旧 PR %s 个" % stale_prs)
+    anomaly_parts.extend(errs)
+    anomaly_summary = "；".join(anomaly_parts) if anomaly_parts else "无"
+
+    return (
+        "| 指标 | 数值 |\n"
+        "|------|------|\n"
+        "| ⭐ 总 Star | %s |\n"
+        "| 📈 Star 增量（较昨日） | %s |\n"
+        "| 🍴 总 Fork | %s |\n"
+        "| 📈 Fork 增量（较昨日） | %s |\n"
+        "| 🔀 今日合并 PR | %s |\n"
+        "| 🆕 今日新开 PR | %s |\n"
+        "| 📌 今日新增 Issue | %s |\n"
+        "| ✅ 今日关闭 Issue | %s |\n"
+        "| ⚠️ 异常速览 | %s |\n"
+    ) % (
+        _fmt(g.get("stars_total")),
+        _delta_str(g.get("stars_delta_today")),
+        _fmt(g.get("forks_total")),
+        _delta_str(g.get("forks_delta_today")),
+        _fmt(g.get("prs_merged_today")),
+        _fmt(g.get("prs_opened_today")),
+        _fmt(g.get("issues_opened_today")),
+        _fmt(g.get("issues_closed_today")),
+        anomaly_summary,
+    )
+
+
+def _build_repos_section(report, repo_summaries):
+    """根据 report.repos 与 repo_summaries 生成二、分仓详情 Markdown（含可点击链接）。"""
+    lines = []
+    for r in report.get(STR_REPOS) or []:
+        repo_key = r.get(STR_REPO) or ""
+        fetch_err = r.get(STR_FETCH_ERROR)
+        if fetch_err:
+            lines.append("### %s\n\n该仓库数据拉取失败：%s\n\n" % (repo_key, fetch_err))
+            continue
+        rs = r.get(STR_REPO_SUMMARY) or {}
+        today = r.get(STR_TODAY) or {}
+        summary_text = repo_summaries.get(repo_key) or "（未生成摘要）"
+
+        def _d(val):
+            if val is None:
+                return "—"
+            return ("+" if val >= 0 else "") + str(val)
+
+        pr_rate = today.get("pr_merge_rate")
+        pr_rate_str = (str(int(pr_rate * 100)) + "%") if pr_rate is not None else "N/A"
+
+        lines.append("### 📦 %s\n\n" % repo_key)
+        lines.append(
+            "- **Star**：%s（%s）　**Fork**：%s（%s）\n"
+            "- **今日合并 PR**：%s　**今日新开 PR**：%s　**PR 合并率**：%s\n"
+            "- **今日新增 Issue**：%s　**今日关闭 Issue**：%s\n"
+            "- **代码变更（当日合并 PR）**：+%s / -%s 行　**活跃贡献者**：%s\n"
+            "- **陈旧 Issue**：%s　**陈旧 PR**：%s\n\n"
+            % (
+                _fmt(rs.get("stars")), _d(rs.get("stars_delta")),
+                _fmt(rs.get("forks")), _d(rs.get("forks_delta")),
+                today.get(STR_PRS_MERGED, 0), today.get(STR_PRS_OPENED, 0), pr_rate_str,
+                today.get(STR_ISSUES_OPENED, 0), today.get(STR_ISSUES_CLOSED, 0),
+                today.get(STR_CODE_ADDITIONS, 0), today.get(STR_CODE_DELETIONS, 0), today.get(STR_ACTIVE_CONTRIBUTORS, 0),
+                today.get("stale_issues_count", 0), today.get("stale_prs_count", 0),
+            )
+        )
+
+        merged_list = today.get(STR_MERGED_PRS_TODAY_LIST) or []
+        if merged_list:
+            lines.append("**🔀 当日合并 PR**\n\n")
+            for p in merged_list:
+                extra = ""
+                add = p.get(STR_ADDITIONS)
+                if add and add > 0:
+                    extra = "（⚡ +%s 行）" % add
+                lines.append(MD_LIST_PREFIX % _md_pr_link(repo_key, p.get(STR_NUMBER), (p.get(STR_TITLE) or "").strip(), extra))
+            lines.append("\n")
+
+        opened_prs = today.get(STR_PRS_OPENED_TODAY_LIST) or []
+        if opened_prs:
+            lines.append("**🆕 当日新开 PR**\n\n")
+            for p in opened_prs:
+                lines.append(MD_LIST_PREFIX % _md_pr_link(repo_key, p.get(STR_NUMBER), (p.get(STR_TITLE) or "").strip()))
+            lines.append("\n")
+
+        opened_list = today.get(STR_ISSUES_OPENED_TODAY_LIST) or []
+        if opened_list:
+            lines.append("**📌 当日新增 Issue**\n\n")
+            for i in opened_list:
+                lines.append(MD_LIST_PREFIX % _md_issue_link(repo_key, i.get(STR_NUMBER), (i.get(STR_TITLE) or "").strip()))
+            lines.append("\n")
+
+        closed_list = today.get(STR_ISSUES_CLOSED_TODAY_LIST) or []
+        if closed_list:
+            lines.append("**✅ 当日关闭 Issue**\n\n")
+            for i in closed_list:
+                lines.append(MD_LIST_PREFIX % _md_issue_link(repo_key, i.get(STR_NUMBER), (i.get(STR_TITLE) or "").strip()))
+            lines.append("\n")
+
+        hot_issues = today.get(STR_HOT_ISSUES) or []
+        if hot_issues:
+            lines.append("**🔥 热门 Issue（当日评论较多）**\n\n")
+            for h in hot_issues:
+                lines.append("- %s（%s 条评论）\n" % (_md_issue_link(repo_key, h.get(STR_NUMBER), (h.get(STR_TITLE) or "").strip()), h.get("comments_today", 0)))
+            lines.append("\n")
+
+        lines.append("**💬 该仓小结**：%s\n\n---\n\n" % summary_text)
+    return "".join(lines)
+
+
+def _build_action_section(report, repo_summaries, global_summary):
+    """生成三、行动建议：基于数据自动识别需关注事项，不再重复摘要。"""
+    lines = []
+    actions = []
+    for r in report.get(STR_REPOS) or []:
+        repo_key = r.get(STR_REPO) or ""
+        if r.get(STR_FETCH_ERROR):
+            actions.append("- ❌ **%s**：数据拉取失败，请检查仓库名称或 Token 权限" % repo_key)
+            continue
+        today = r.get(STR_TODAY) or {}
+        stale_i = today.get("stale_issues_count", 0)
+        stale_p = today.get("stale_prs_count", 0)
+        hot = today.get(STR_HOT_ISSUES) or []
+        major = today.get(STR_MAJOR_PRS) or []
+        if stale_i > 0:
+            actions.append("- ⏳ **%s** 有 %s 个陈旧 Issue（open 超 30 天），建议评审清理" % (repo_key, stale_i))
+        if stale_p > 0:
+            actions.append("- ⏳ **%s** 有 %s 个陈旧 PR（open 超 30 天），建议评审或关闭" % (repo_key, stale_p))
+        for h in hot:
+            actions.append("- 🔥 **%s** %s 今日 %s 条评论，建议跟进" % (repo_key, _md_issue_link(repo_key, h.get(STR_NUMBER), (h.get(STR_TITLE) or "").strip()), h.get("comments_today", 0)))
+        for m in major:
+            actions.append("- ⚡ **%s** %s（+%s 行），建议重点 review" % (repo_key, _md_pr_link(repo_key, m.get(STR_NUMBER), (m.get(STR_TITLE) or "").strip()), m.get(STR_ADDITIONS, 0)))
+
+    if actions:
+        lines.append("基于当日数据自动识别的关注事项：\n\n")
+        lines.extend(a + "\n" for a in actions)
+    else:
+        lines.append("当日无需特别关注的事项。\n")
+
+    lines.append("\n**📊 整体**：%s\n" % (global_summary or "（未生成摘要）"))
+    return "".join(lines)
+
+
+def _render_report(report_json_path, summaries_file_path, template_path, output_path):
+    """读取 report JSON、摘要 JSON、模板，填充后写入 output_path。支持 day/week/month。"""
+    with open(report_json_path, "r", encoding=ENCODING_UTF8_SIG) as f:
+        out = json.load(f)
+    if out.get(STR_STATUS) != STR_OK or STR_REPORT not in out:
+        _print_json({STR_STATUS: STR_ERROR, STR_MESSAGE: "report JSON 需为 status=ok 且含 report"})
+        return False
+    report = out[STR_REPORT]
+    period = (report.get("period_type") or STR_DAY).strip().lower()
+
+    if not template_path or not Path(template_path).exists():
+        auto_tpl = _PERIOD_TEMPLATES.get(period)
+        if auto_tpl and auto_tpl.exists():
+            template_path = str(auto_tpl)
+        else:
+            _print_json({STR_STATUS: STR_ERROR, STR_MESSAGE: "模板文件不存在: " + str(template_path)})
+            return False
+
+    repo_summaries = {}
+    global_summary = ""
+    if summaries_file_path and Path(summaries_file_path).exists():
+        try:
+            with open(summaries_file_path, "r", encoding=ENCODING_UTF8) as f:
+                sum_data = json.load(f)
+            for r in sum_data.get(STR_REPOS) or []:
+                repo = (r.get(STR_REPO) or "").strip()
+                if repo and "/" in repo:
+                    repo_summaries[repo] = (r.get("summary") or "").strip()
+            global_summary = (sum_data.get("global") or "").strip()
+        except Exception as e:
+            logger.debug("Failed to load summaries file: %s", e)
+
+    with open(template_path, "r", encoding=ENCODING_UTF8) as f:
+        tpl = f.read()
+
+    g = report.get("global") or {}
+    date_start = report.get("date_start") or report.get(STR_DATE) or ""
+    date_end = report.get("date_end") or report.get(STR_DATE) or ""
+    replacements = {
+        "{{DATE}}": report.get(STR_DATE) or "",
+        "{{DATE_START}}": date_start,
+        "{{DATE_END}}": date_end,
+        "{{TIMEZONE}}": report.get("timezone") or "Asia/Shanghai",
+        "{{REPOS_TOTAL}}": str(g.get("repos_total") or 0),
+        "{{REPOS_ACTIVE}}": str(g.get("repos_active_today") or 0),
+        "{{GLOBAL_TABLE}}": _build_global_table(report),
+        "{{GLOBAL_SUMMARY}}": global_summary or "（未生成摘要）",
+        "{{REPOS_SECTION}}": _build_repos_section(report, repo_summaries),
+        "{{ACTION_SECTION}}": _build_action_section(report, repo_summaries, global_summary),
+    }
+    for k, v in replacements.items():
+        tpl = tpl.replace(k, v)
+    out_dir = Path(output_path).parent
+    if out_dir and not out_dir.exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding=ENCODING_UTF8) as f:
+        f.write(tpl)
+    _print_json({STR_STATUS: STR_OK, "output": str(Path(output_path).resolve())})
+    return True
+
+
+def _save_summaries_from_file(summaries_file_path):
+    """从 JSON 文件读取摘要并写入 DB（daily_summaries / weekly_summaries / monthly_summaries）。由 Agent 在生成摘要后调用。"""
+    path = Path(summaries_file_path)
+    if not path.exists():
+        _print_json({STR_STATUS: STR_ERROR, STR_MESSAGE: "摘要文件不存在: " + summaries_file_path})
+        return False
+    with open(path, "r", encoding=ENCODING_UTF8) as f:
+        data = json.load(f)
+    period_type = (data.get("period_type") or STR_DAY).strip().lower()
+    date_str = (data.get(STR_DATE) or "").strip()
+    if not date_str or len(date_str) < 10:
+        _print_json({STR_STATUS: STR_ERROR, STR_MESSAGE: "摘要 JSON 需包含 date (YYYY-MM-DD)"})
+        return False
+    date_str = date_str[:10]
+    ensure_db()
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        for r in data.get(STR_REPOS) or []:
+            repo = (r.get(STR_REPO) or "").strip()
+            summary = (r.get("summary") or "").strip()
+            if not repo or "/" not in repo:
+                continue
+            if period_type == STR_DAY:
+                conn.execute("INSERT OR REPLACE INTO daily_summaries (date, repo, summary_text) VALUES (?, ?, ?)", (date_str, repo, summary))
+            elif period_type == STR_WEEK:
+                conn.execute("INSERT OR REPLACE INTO weekly_summaries (week_start_date, repo, summary_text) VALUES (?, ?, ?)", (date_str, repo, summary))
+            else:
+                conn.execute("INSERT OR REPLACE INTO monthly_summaries (month_start_date, repo, summary_text) VALUES (?, ?, ?)", (date_str, repo, summary))
+        global_summary = (data.get("global") or "").strip()
+        if period_type == STR_DAY:
+            conn.execute("INSERT OR REPLACE INTO daily_summaries (date, repo, summary_text) VALUES (?, ?, ?)", (date_str, GLOBAL_REPO, global_summary))
+        elif period_type == STR_WEEK:
+            conn.execute("INSERT OR REPLACE INTO weekly_summaries (week_start_date, repo, summary_text) VALUES (?, ?, ?)", (date_str, GLOBAL_REPO, global_summary))
+        else:
+            conn.execute("INSERT OR REPLACE INTO monthly_summaries (month_start_date, repo, summary_text) VALUES (?, ?, ?)", (date_str, GLOBAL_REPO, global_summary))
+        conn.commit()
+    finally:
+        conn.close()
+    _print_json({STR_STATUS: STR_OK})
+    return True
+
+
+def _fallback_fetch_missing_repos(params):
+    """对报表中缺数据的仓库用首尾日 API 补拉。"""
+    if not params.token:
+        return
+    for i, r in enumerate(params.report[STR_REPOS]):
+        err = r.get(STR_FETCH_ERROR) or ""
+        if params.error_keyword not in err or "/" not in r.get(STR_REPO, ""):
+            continue
+        owner, repo_name = r[STR_REPO].strip().split("/", 1)
+        fetch_params1 = RepoFetchParams(
+            token=params.token,
+            owner=owner,
+            repo=repo_name,
+            report_date=params.start_date,
+            cfg=params.cfg,
+            tz_offset=params.tz_offset,
+        )
+        fetch_params2 = RepoFetchParams(
+            token=params.token,
+            owner=owner,
+            repo=repo_name,
+            report_date=params.end_date,
+            cfg=params.cfg,
+            tz_offset=params.tz_offset,
+        )
+        d1, e1 = fetch_one_repo(fetch_params1)
+        d2, e2 = fetch_one_repo(fetch_params2)
+        if e1 or e2:
+            continue
+        merged = _merge_two_daily_repo_results(d1, d2)
+        params.report[STR_REPOS][i] = merged
+        g = params.report["global"]
+        g["prs_merged_today"] += merged[STR_TODAY][STR_PRS_MERGED]
+        g["prs_closed_today"] += merged[STR_TODAY][STR_PRS_CLOSED]
+        g["issues_opened_today"] += merged[STR_TODAY][STR_ISSUES_OPENED]
+        g["issues_closed_today"] += merged[STR_TODAY][STR_ISSUES_CLOSED]
+        g["stars_total"] += (merged.get(STR_REPO_SUMMARY) or {}).get("stars", 0)
+        g["forks_total"] = g.get("forks_total", 0) + (merged.get(STR_REPO_SUMMARY) or {}).get("forks", 0)
+        g["stale_issues_total"] = g.get("stale_issues_total", 0) + merged[STR_TODAY].get("stale_issues_count", 0)
+        g["stale_prs_total"] = g.get("stale_prs_total", 0) + merged[STR_TODAY].get("stale_prs_count", 0)
+        g["prs_opened_today"] = g.get("prs_opened_today", 0) + merged[STR_TODAY].get(STR_PRS_OPENED, 0)
+        if merged[STR_TODAY][STR_PRS_MERGED] + merged[STR_TODAY][STR_ISSUES_OPENED] + merged[STR_TODAY][STR_ISSUES_CLOSED] > 0:
+            g["repos_active_today"] += 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description="GitCode 仓库运营日报/周报/月报：拉取数据或从 DB 聚合，输出 JSON；或从摘要文件写入 DB；或根据模板渲染日报 Markdown")
+    parser.add_argument("--type", choices=[STR_DAY, STR_WEEK, STR_MONTH], default=STR_DAY, help="报表类型：day=日报(调API)，week=周报(仅DB)，month=月报(仅DB)")
+    parser.add_argument("--date", metavar="YYYY-MM-DD", help="报表日期：日报=该日；周报=该周周一；月报=该月1号。默认今日/本周/本月")
+    parser.add_argument("--save-summaries", action="store_true", help="将摘要 JSON 写入 DB，与 --summaries-file 同用")
+    parser.add_argument("--summaries-file", metavar=STR_PATH, default=str(DEFAULT_TEMP_DIR / "summaries.json"),
+                        help="摘要 JSON 路径（相对路径按技能根目录解析），默认: temp_dir/summaries.json")
+    parser.add_argument("--render", action="store_true", help="渲染模式：根据 report JSON + 摘要 JSON + 模板 生成日报 Markdown，需同时指定 --output")
+    parser.add_argument("--report-json", metavar=STR_PATH, default=str(DEFAULT_TEMP_DIR / FILE_REPORT_JSON),
+                        help="report JSON 路径（相对路径按技能根目录解析），默认: temp_dir/report.json")
+    parser.add_argument("--template", metavar=STR_PATH, default="",
+                        help="报表模板路径，留空则自动按 period_type 选择对应模板")
+    parser.add_argument("--output", "-o", metavar=STR_PATH, help="渲染输出的 Markdown 文件路径")
+    parser.add_argument("--repos", metavar="owner/repo,...",
+                        help="仓库列表，逗号分隔；传入后用于本次并保存到 config.json，下次未指定时将使用此列表")
+    args = parser.parse_args()
+
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding=ENCODING_UTF8)
+            sys.stderr.reconfigure(encoding=ENCODING_UTF8)
+        except Exception as e:
+            logger.debug("Failed to reconfigure stdout/stderr encoding: %s", e)
+
+    if args.render:
+        rj = _resolve_skill_path(args.report_json)
+        sf = _resolve_skill_path(args.summaries_file)
+        tpl = _resolve_skill_path(args.template) if args.template else ""
+        out_path = args.output
+        if not out_path:
+            _print_json({STR_STATUS: STR_ERROR, STR_MESSAGE: "渲染模式需指定 --output"})
+            sys.exit(1)
+        if sf and Path(sf).exists():
+            _save_summaries_from_file(sf)
+        _render_report(rj, sf, tpl, out_path)
+        return
+
+    if args.save_summaries:
+        sf = _resolve_skill_path(args.summaries_file)
+        _save_summaries_from_file(sf)
+        return
+
+    cfg = load_config()
+    repos_saved = False
+    if getattr(args, STR_REPOS, None) and str(args.repos).strip():
+        parsed = [r.strip() for r in str(args.repos).split(",") if "/" in r.strip()]
+        if parsed:
+            save_config_repos(parsed)
+            cfg[STR_REPOS] = parsed
+            repos_saved = True
+    repos = cfg.get(STR_REPOS) or []
+    if not repos:
+        out = {STR_STATUS: STR_ERROR, STR_MESSAGE: "未配置仓库列表，请通过 --repos 传入或在 config.json 中配置 repos"}
+        _print_json(out)
+        sys.exit(1)
+
+    timezone_str = cfg.get("timezone") or "Asia/Shanghai"
+    tz_offset = _get_tz_offset_hours(cfg)
+    report_date = _get_report_date(cfg, args.date)
+    report_type = args.type or STR_DAY
+
+    ensure_db()
+    temp_path = SKILL_ROOT / "temp_dir"
+    temp_path.mkdir(parents=True, exist_ok=True)
+
+    if report_type == STR_WEEK:
+        week_start = _week_monday(report_date)
+        week_end = week_start + timedelta(days=6)
+        report = build_report_from_db_week(week_start, cfg)
+        token = get_token()
+        fallback_params = FallbackFetchParams(
+            report=report,
+            token=token,
+            start_date=week_start,
+            end_date=week_end,
+            cfg=cfg,
+            tz_offset=tz_offset,
+            error_keyword="无该周每日数据",
+        )
+        _fallback_fetch_missing_repos(fallback_params)
+        out = {STR_STATUS: STR_OK, STR_SCHEMA_VERSION: SCHEMA_VERSION_VALUE, STR_GENERATED_AT: datetime.now(timezone.utc).strftime(FMT_DATETIME_UTC), STR_REPORT: report}
+        if repos_saved:
+            out[STR_REPOS_SAVED] = True
+            out[STR_REPOS_SAVED_MESSAGE] = MSG_REPOS_SAVED
+        _print_json(out, save_to=temp_path / FILE_REPORT_JSON)
+        return
+    if report_type == STR_MONTH:
+        month_start = _month_start(report_date)
+        month_end = _month_end(month_start)
+        report = build_report_from_db_month(month_start, cfg)
+        token = get_token()
+        fallback_params = FallbackFetchParams(
+            report=report,
+            token=token,
+            start_date=month_start,
+            end_date=month_end,
+            cfg=cfg,
+            tz_offset=tz_offset,
+            error_keyword="无该月每日数据",
+        )
+        _fallback_fetch_missing_repos(fallback_params)
+        out = {STR_STATUS: STR_OK, STR_SCHEMA_VERSION: SCHEMA_VERSION_VALUE, STR_GENERATED_AT: datetime.now(timezone.utc).strftime(FMT_DATETIME_UTC), STR_REPORT: report}
+        if repos_saved:
+            out[STR_REPOS_SAVED] = True
+            out[STR_REPOS_SAVED_MESSAGE] = MSG_REPOS_SAVED
+        _print_json(out, save_to=temp_path / FILE_REPORT_JSON)
+        return
+
+    token = get_token()
+    if not token:
+        out = {STR_STATUS: STR_ERROR, STR_MESSAGE: "未配置 GITCODE_TOKEN 或 Token 无效，请到 GitCode 创建个人访问令牌并设置环境变量 GITCODE_TOKEN"}
+        _print_json(out)
+        sys.exit(1)
+
+    max_repos = cfg.get("max_repos_per_report") or 50
+    repos = [r.strip() for r in repos if "/" in r.strip()][:max_repos]
+
+    global_fetch_errors = []
+    repos_data = []
+    stars_total = 0
+    forks_total = 0
+    stars_delta_total = 0
+    forks_delta_total = 0
+    has_any_delta = False
+    issues_opened_today = 0
+    issues_closed_today = 0
+    prs_merged_today = 0
+    prs_closed_today = 0
+    prs_opened_today = 0
+    stale_issues_total = 0
+    stale_prs_total = 0
+    repos_active_today = 0
+
+    for repo_spec in repos:
+        owner, repo = repo_spec.strip().split("/", 1)
+        fetch_params = RepoFetchParams(
+            token=token,
+            owner=owner,
+            repo=repo,
+            report_date=report_date,
+            cfg=cfg,
+            tz_offset=tz_offset,
+        )
+        data, fetch_err = fetch_one_repo(fetch_params)
+        if fetch_err:
+            global_fetch_errors.append("%s: %s" % (repo_spec, fetch_err))
+            repos_data.append({STR_REPO: repo_spec, STR_FETCH_ERROR: fetch_err})
+            continue
+        repos_data.append(data)
+        rs = data.get(STR_REPO_SUMMARY) or {}
+        stars_total += rs.get("stars", 0)
+        forks_total += rs.get("forks", 0)
+        if rs.get("stars_delta") is not None:
+            stars_delta_total += rs["stars_delta"]
+            has_any_delta = True
+        if rs.get("forks_delta") is not None:
+            forks_delta_total += rs["forks_delta"]
+        today = data.get(STR_TODAY) or {}
+        issues_opened_today += today.get(STR_ISSUES_OPENED, 0)
+        issues_closed_today += today.get(STR_ISSUES_CLOSED, 0)
+        prs_merged_today += today.get(STR_PRS_MERGED, 0)
+        prs_closed_today += today.get(STR_PRS_CLOSED, 0)
+        prs_opened_today += today.get(STR_PRS_OPENED, 0)
+        stale_issues_total += today.get("stale_issues_count", 0)
+        stale_prs_total += today.get("stale_prs_count", 0)
+        if (today.get(STR_PRS_MERGED, 0) + today.get(STR_ISSUES_OPENED, 0) + today.get(STR_ISSUES_CLOSED, 0)) > 0:
+            repos_active_today += 1
+
+    report = {
+        "period_type": STR_DAY,
+        STR_DATE: report_date.strftime("%Y-%m-%d"),
+        "timezone": timezone_str,
+        "global": {
+            "repos_total": len(repos),
+            "repos_active_today": repos_active_today,
+            "stars_total": stars_total,
+            "stars_delta_today": stars_delta_total if has_any_delta else None,
+            "forks_total": forks_total,
+            "forks_delta_today": forks_delta_total if has_any_delta else None,
+            "issues_opened_today": issues_opened_today,
+            "issues_closed_today": issues_closed_today,
+            "prs_merged_today": prs_merged_today,
+            "prs_closed_today": prs_closed_today,
+            "prs_opened_today": prs_opened_today,
+            "stale_issues_total": stale_issues_total,
+            "stale_prs_total": stale_prs_total,
+            "fetch_errors": global_fetch_errors,
+        },
+        STR_REPOS: repos_data,
+    }
+
+    out = {
+        STR_STATUS: STR_OK,
+        STR_SCHEMA_VERSION: SCHEMA_VERSION_VALUE,
+        STR_GENERATED_AT: datetime.now(timezone.utc).strftime(FMT_DATETIME_UTC),
+        STR_REPORT: report,
+    }
+    if repos_saved:
+        out[STR_REPOS_SAVED] = True
+        out[STR_REPOS_SAVED_MESSAGE] = MSG_REPOS_SAVED
+    _print_json(out, save_to=temp_path / FILE_REPORT_JSON)
+
+
+if __name__ == "__main__":
+    main()
