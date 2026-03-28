@@ -1,0 +1,10 @@
+{
+  "issue_content_max_chars": 3000,
+  "deepwiki_timeout": 120,
+  "deepwiki_max_retries": 3,
+  "dry_run": false,
+  "enable_deepwiki": true,
+  "api_timeout": 30,
+  "cache_ttl_seconds": 300,
+  "enable_cache": true
+}
