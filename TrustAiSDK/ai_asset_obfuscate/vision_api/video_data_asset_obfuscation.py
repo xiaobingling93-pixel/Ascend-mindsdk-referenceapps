@@ -48,6 +48,10 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         self.shortest_edge = shortest_edge
         self.temporal_patch_size = temporal_patch_size
         self.factor = self.patch_size * self.merge_size
+        if self.factor == 0 or self.longest_edge == 0 or self.temporal_patch_size == 0:
+            log.error("The 'factor' or 'longest_edge' or 'temporal_patch_size' cannot be zero.")
+            raise ObfException(ErrorCode.INVALID_PARAM.value)
+ 
         self.num_frames = num_frames
         self.fps = -1
         self.is_seed_content = False
@@ -62,6 +66,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         min_pixels: int,
         max_pixels: int,
     ) -> Tuple[int, int]:
+        if height == 0 or width == 0:
+            log.error("Failed to parse video metadata.")
+            raise ObfException(ErrorCode.INVALID_VIDEO_METADATAS.value)
         if height < factor or width < factor:
             log.error(f"Video frame height:{height} or width:{width} must be larger than factor:{factor}")
             raise ObfException(ErrorCode.INVALID_VIDEO_FRAME_SIZE.value)
@@ -116,28 +123,28 @@ class VideoDataAssetObfuscation(AssetObfuscation):
 
     @staticmethod
     def _read_video(vide: bytes):
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mkv")
+        tmp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".mkv")
         temp_path = tmp_file.name
 
         try:
             tmp_file.write(vide)
             tmp_file.flush()
-            tmp_file.close()
 
             cap = cv2.VideoCapture(temp_path)
 
             if not cap.isOpened():
                 cap.release()
-                os.remove(temp_path)
                 log.error("Failed to open video.")
                 raise ObfException(ErrorCode.INVALID_VIDEO)
 
             return cap
         except Exception as e:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
             log.error("read video failed")
             raise ObfException(ErrorCode.FAILED) from e
+        finally:
+            tmp_file.close()
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     @classmethod
     def create_by_config(cls, config_path: str, num_frames: int = 32):
@@ -214,6 +221,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         except Exception as e:
             log.error(f"Failed to obfuscate video: {e}")
             raise ObfException(ErrorCode.FAILED.value) from e
+        finally:
+            if cap is not None:
+                cap.release() # 释放视频资源
 
         obf_base64_data = obf_video_bytes.getvalue()
         obf_base64_data = base64.b64encode(obf_base64_data).decode('utf-8')
@@ -250,6 +260,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         except Exception as e:
             log.error(f"Failed to obfuscate video: {e}")
             raise ObfException(ErrorCode.FAILED.value) from e
+        finally:
+            if cap is not None:
+                cap.release() # 释放视频资源
 
         return bytearray(obf_video_bytes.getvalue())
 
@@ -340,6 +353,9 @@ class VideoDataAssetObfuscation(AssetObfuscation):
         return ErrorCode.SUCCESS.value
     
     def _sample_frames(self, total_frames: int, fps) -> list:
+        if total_frames == 0 or fps == 0:
+            log.error("Failed to parse video metadata.")
+            raise ObfException(ErrorCode.INVALID_VIDEO_METADATAS.value)
         target_frames = total_frames
         if self.num_frames > 0:
             target_frames = min(self.num_frames, total_frames)

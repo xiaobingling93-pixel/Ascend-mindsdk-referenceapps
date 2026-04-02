@@ -78,6 +78,7 @@ class ErrorCode(Enum):
     OBFUSCATOR_NOT_INITIALIZED = (5018, "Obfuscator is not initialized.")
     INVALID_ELEMENT_SIZE = (5019, "Invalid element size for data type.")
     UNSUPPORTED_DTYPE = (5020, "The dtype is not supported.")
+    INVALID_VIDEO_METADATAS = (5021, "Failed to parse video metadata.")
 
 
     @property
