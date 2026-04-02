@@ -43,6 +43,10 @@ class ImageDataAssetObfuscation(AssetObfuscation):
         self.shortest_edge = shortest_edge
         self.temporal_patch_size = temporal_patch_size
         self.factor = self.patch_size * self.merge_size
+        if self.factor == 0 or self.longest_edge == 0:
+            log.error("The 'factor' or 'longest_edge' cannot be zero.")
+            raise ObfException(ErrorCode.INVALID_PARAM.value)
+ 
         self.is_seed_content = False
 
     @staticmethod
