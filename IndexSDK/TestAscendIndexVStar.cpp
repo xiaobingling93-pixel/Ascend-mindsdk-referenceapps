@@ -71,9 +71,9 @@ void Norm(std::vector<float> &data, int dim)
 /**
  * AKMode需要提前生成算子和码本
  * 码本和算子参数根据实际情况调整, dim nlistL1 subDimL1 要与创建的索引一致
- * 算子：python3 vstar_generate_models.py --dim 1024 --nlist1 1024 --subDimL1 32
+ * 算子：python3 vstar_generate_models.py --dim 1024 --nlistL1 256 --subDimL1 128
  * 码本：python3 vstar_train_codebook.py --dataPath {实际base数据路径} --dim 1024 --codebookPath {实际码本输出路径}
- --nListL1 1024 --subDimL1 32 --device 0
+ --nlistL1 256 --subDimL1 128 --device 0
  */
 TEST(TestAscendIndexVstar, Test_Search_Func)
 {
