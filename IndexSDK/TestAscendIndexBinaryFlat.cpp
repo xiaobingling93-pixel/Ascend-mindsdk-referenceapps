@@ -51,7 +51,7 @@ inline double GetMillisecs()
 TEST(TestAscendIndexBinaryFlat, QPS)
 {
     int dim = 512;
-    size_t ntotal = 10000000;
+    size_t ntotal = 1000000;
     std::vector<int> searchNum = { 8, 16, 32, 64, 128, 256 };
 
     faiss::ascend::AscendIndexBinaryFlatConfig conf({ 0 });

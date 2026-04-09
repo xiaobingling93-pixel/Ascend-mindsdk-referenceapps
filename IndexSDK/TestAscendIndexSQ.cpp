@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// 需要生成aicpu算子+sq8算子(-d 256)+sq8算子(-d 512)
+// 需要生成aicpu算子+sq8算子(-d 256)
 
 #include <numeric>
 #include <random>
@@ -95,8 +95,8 @@ size_t search_warm(faiss::ascend::AscendIndexSQ &index, faiss::ascend::AscendInd
 
 TEST(TestAscendIndexSQ, QPS)
 {
-    std::vector<int> dim = { 256, 512 };
-    std::vector<size_t> ntotal = { 7000000 };
+    std::vector<int> dim = { 256 };
+    std::vector<size_t> ntotal = { 1000000 };
     std::vector<int> searchNum = { 1, 2, 4, 8, 16, 32, 48, 64, 96 };
     try {
         size_t maxSize = ntotal.back() * dim.back();

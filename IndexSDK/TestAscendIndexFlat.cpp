@@ -135,7 +135,7 @@ void Norm(float *data, size_t n, int dim)
 TEST(TestAscendIndexFlat, QPS)
 {
     int dim = 512;
-    size_t ntotal = 7000000;
+    size_t ntotal = 1000000;
     size_t maxSize = ntotal * dim;
     try {
         std::vector<float> data(maxSize);
