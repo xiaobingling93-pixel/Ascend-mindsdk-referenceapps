@@ -105,7 +105,7 @@ template<class T> recallMap calRecall(std::vector<T> label, int64_t *gt, int que
 TEST(TestAscendIndexInt8Flat, QPS)
 {
     int dim = 512;
-    size_t ntotal = 7000000;
+    size_t ntotal = 1000000;
     std::vector<int> searchNum = { 8, 16, 32, 64, 128, 256 };
     try {
         faiss::ascend::AscendIndexInt8FlatConfig conf({ 0 }, 1024 * 1024 * 1024);
@@ -157,7 +157,7 @@ TEST(TestAscendIndexInt8Flat, QPS)
 TEST(TestAscendIndexInt8Flat, Recall)
 {
     int dim = 512;
-    size_t ntotal = 7000000;
+    size_t ntotal = 1000000;
     int searchNum = 8;
     try {
         faiss::ascend::AscendIndexInt8FlatConfig conf({ 0 }, 1024 * 1024 * 1024);

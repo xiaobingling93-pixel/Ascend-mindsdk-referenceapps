@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
- // 需要生成aicpu算子+sq8(-d 64)
+ // 需要生成aicpu算子+sq8(-d 256)
 
 #include <numeric>
 #include <random>
@@ -30,7 +30,7 @@
 
 namespace {
 const auto METRIC_TYPE = faiss::METRIC_INNER_PRODUCT;
-const auto DIM = 64;
+const auto DIM = 256;
 const int NTOTAL = 1000000;
 const std::vector<int> DEVICE_IDS = { 0 };
 unsigned int g_seed;
