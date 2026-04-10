@@ -1,7 +1,7 @@
-FROM ubuntu:22.04
+FROM swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.0.0-beta.1-a3-ubuntu22.04-py3.11
 WORKDIR /tmp
-ARG ARCH=x86_64
-ARG PLATFORM=910B
+
+ARG PLATFORM=A3
 # 系统包 + pip3
 RUN cp -a /etc/apt/sources.list /etc/apt/sources.list.bak && \
     sed -i "s@http://.*archive.ubuntu.com@http://mirrors.huaweicloud.com@g" /etc/apt/sources.list && \
@@ -26,7 +26,6 @@ RUN mkdir ~/.pip && touch ~/.pip/pip.conf && \
     echo "timeout=200" >> ~/.pip/pip.conf
 # python包
 RUN pip3 install -U pip && \
-    pip3 install numpy && \
     pip3 install decorator && \
     pip3 install sympy==1.4 && \
     pip3 install cffi==1.15.1 && \
@@ -46,16 +45,15 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt install --no-install-recommends software-properties-common -y && \
     apt install --no-install-recommends build-essential -y
 
-
 # 安装cmake
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.24.0/cmake-3.24.0.tar.gz 
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.24.0/cmake-3.24.0.tar.gz
 RUN tar xf cmake-3.24.0.tar.gz && cd cmake-3.24.0 && ./configure --prefix=/usr && \
-    make -j && make -j install && cd .. && rm -rf cmake-3.24.0*
+    make -j12 && make -j12 install && cd .. && rm -rf cmake-3.24.0*
 
-RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.10.tar.gz -O OpenBLAS-0.3.10.tar.gz 
+RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.10.tar.gz -O OpenBLAS-0.3.10.tar.gz
 RUN tar -xf OpenBLAS-0.3.10.tar.gz && \
     cd OpenBLAS-0.3.10 && \
-    make FC=gfortran CC=gcc CXX=g++ TARGET=GENERIC USE_OPENMP=1 -j && \
+    make FC=gfortran USE_OPENMP=1 -j12 && \
     make install && \
     ln -s /opt/OpenBLAS/lib/libopenblas.so /usr/lib/libopenblas.so && \
     cd .. && rm -f OpenBLAS-0.3.10.tar.gz && rm -rf OpenBLAS-0.3.10
@@ -73,7 +71,8 @@ RUN wget https://github.com/facebookresearch/faiss/archive/v1.10.0.tar.gz -O fai
     cd ../.. && rm -f faiss-1.10.0.tar.gz && rm -rf faiss-1.10.0  && \
     cp ${install_path}/lib/libfaiss.so /usr/local/lib
 
-RUN wget https://github.com/linux-test-project/lcov/releases/download/v2.0/lcov-2.0.tar.gz  && \
+
+    RUN wget https://github.com/linux-test-project/lcov/releases/download/v2.0/lcov-2.0.tar.gz  && \
     tar -xzf lcov-2.0.tar.gz && \
     cd lcov-2.0 && make install  && \
     cd .. && rm -rf lcov-2.0.tar.gz lcov-2.0
@@ -89,14 +88,10 @@ RUN rm -rf ./*
 
 WORKDIR /tmp
 ARG ASCEND_BASE=/usr/local/Ascend
-ARG TOOLKIT_PKG=Ascend-cann-toolkit*_linux-${ARCH}.run
+
 ARG TOOLKIT_PATH=$ASCEND_BASE/ascend-toolkit/latest
 
-COPY $TOOLKIT_PKG ./
 USER root
-RUN chmod +x $TOOLKIT_PKG && \
-    ./$TOOLKIT_PKG --quiet --full --install-path=$ASCEND_BASE --install-for-all && \
-    rm -f $TOOLKIT_PKG
 
 ENV GLOG_v=2
 ENV LD_LIBRARY_PATH=$TOOLKIT_PATH/runtime/lib64:$LD_LIBRARY_PATH
@@ -105,15 +100,20 @@ ENV PATH=$TOOLKIT_PATH/atc/ccec_compiler/bin:$TOOLKIT_PATH/atc/bin:$PATH
 ENV ASCEND_OPP_PATH=$TOOLKIT_PATH/opp
 ENV ASCEND_AICPU_PATH=$TOOLKIT_PATH
 ENV PYTHONPATH=$TBE_IMPL_PATH:$PYTHONPATH
-
-COPY ./Ascend-mindxsdk-mxindex*_linux-${ARCH}.run ./
-RUN bash Ascend-mindxsdk-mxindex*_linux-${ARCH}.run --install --platform=${PLATFORM}
-ENV MX_INDEX_MODELPATH=/home/Ascend/modelpath
-RUN cd ${ASCEND_BASE}/mxIndex/ops && ./custom_opp_${ARCH}.run && mkdir -p ${MX_INDEX_MODELPATH}
 ENV ASCEND_HOME=${ASCEND_BASE}
+ENV MX_INDEX_MODELPATH=/home/Ascend/modelpath
+ENV ASCEND_HOME=${ASCEND_BASE}
+ENV LD_LIBRARY_PATH=${ASCEND_BASE}/mxIndex/host/lib:$LD_LIBRARY_PATH
+
+RUN mkdir -p ${MX_INDEX_MODELPATH}
+
+COPY ./Ascend-mindxsdk-mxindex*.run ./
+RUN ARCH=$(uname -m | sed 's/x86_64/x86_64/; s/aarch64/aarch64/') && \
+    wget https://mindcluster.obs.cn-north-4.myhuaweicloud.com/IndexSDK/daily/version/26.0.0/20260408.1/Ascend-mindxsdk-mxindex_26.0.0_linux-${ARCH}.run && \
+    bash Ascend-mindxsdk-mxindex*_linux-${ARCH}.run --install --platform=${PLATFORM} && \
+    cd ${ASCEND_BASE}/mxIndex/ops && ./custom_opp_${ARCH}.run
 
 RUN sed -i '$a\source /usr/local/Ascend/ascend-toolkit/set_env.sh' ~/.bashrc && \
-    sed -i '$a\export LD_LIBRARY_PATH=/usr/local/Ascend/mxIndex/host/lib:$LD_LIBRARY_PATH' ~/.bashrc && \
     sed -i '$a\export LD_LIBRARY_PATH=/usr/local/faiss/lib:$LD_LIBRARY_PATH' ~/.bashrc && \
     sed -i '$a\export LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH' ~/.bashrc && \
     sed -i '$a\export LD_LIBRARY_PATH=/usr/local/gtest/lib:$LD_LIBRARY_PATH' ~/.bashrc && \
